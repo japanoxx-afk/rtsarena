@@ -30,6 +30,18 @@ INTERVAL = 30
 MAX_BYTES = 20 * 1024 * 1024
 
 
+def local_name(data: bytes) -> str:
+    """리플레이 머리의 '내 번호'(local) 플레이어 이름 = 올린 사람."""
+    try:
+        import io
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as g:
+            head = json.loads(g.readline().decode("utf-8"))
+        me = head.get("local")
+        return next((p.get("name", "") for p in head.get("players") or [] if p.get("index") == me), "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def replay_kind(path: Path) -> tuple[str, str]:
     """('upload' | 'skip' | 'wait', 이유)."""
     try:
@@ -140,7 +152,7 @@ class ArenaUploader:
         url = f"{self.server_url}/api/{self.game}/replays"
         headers = {"Content-Type": "application/octet-stream",
                    "X-Filename": urllib.parse.quote(filename),
-                   "X-Uploader": urllib.parse.quote(self.account_fn() or "")}
+                   "X-Uploader": urllib.parse.quote(self.account_fn() or local_name(data))}
         if self.token:
             headers["X-Arena-Token"] = self.token
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
