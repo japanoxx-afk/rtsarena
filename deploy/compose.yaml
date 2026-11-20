@@ -1,0 +1,55 @@
+# RTS ARENA (전적 사이트) — Portainer 스택 설정
+#
+# 라크무 서버(new-rakum 저장소 nas-server/compose.yaml)와 같은 방식:
+#   이미지 빌드 없음. 공개 이미지 python:3.12-slim 이 NAS 볼륨의 코드를 그대로 실행한다.
+#   코드 위치: game-servers/rtsarena/app/arena/   (이 저장소의 arena/ 폴더를 통째로 복사)
+#   데이터:    game-servers/rtsarena/data/        (arena.sqlite3, replays/, arena.log)
+#   → 코드 업데이트 = File Station 에서 app/arena 교체 + 컨테이너 재시작.
+#
+# Portainer > Stacks > Add stack > Web editor 에 붙여 넣고, Environment variables 에서:
+#   ARENA_UPLOAD_TOKEN  런처와 같은 업로드 토큰 (필수, 저장소에 적지 않는다)
+#   WEB_PORT            외부(VM) 포트, 기본 30013 (30000~30999 중 비어 있는 것)
+
+name: rtsarena
+
+services:
+  rtsarena-web:
+    image: python:3.12-slim
+    container_name: rtsarena-web
+    restart: unless-stopped
+    working_dir: /mnt/game-servers/rtsarena/app
+    command: ["python", "-u", "-m", "arena"]
+    environment:
+      TZ: Asia/Seoul
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARENA_DATA_DIR: /mnt/game-servers/rtsarena/data
+      ARENA_PORT: "8080"
+      ARENA_UPLOAD_TOKEN: ${ARENA_UPLOAD_TOKEN}
+      # 라크무 로비 서버 전적(승패) — 같은 볼륨의 파일을 읽기만 한다
+      RAKMU_MATCHES_FILE: /mnt/game-servers/rakmu-live/data/matches.json
+      RAKMU_SYNC_SECONDS: "60"
+    ports:
+      - "${WEB_PORT:-30013}:8080/tcp"
+    volumes:
+      - game_servers_data:/mnt/game-servers
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  game_servers_data:
+    external: true

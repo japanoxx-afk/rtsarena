@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "arena-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "arena"],
+      "port": 8080,
+      "env": {"ARENA_DATA_DIR": "data-demo", "ARENA_HOST": "127.0.0.1", "PYTHONIOENCODING": "utf-8"}
+    }
+  ]
+}

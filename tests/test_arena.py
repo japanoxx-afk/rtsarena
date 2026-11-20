@@ -1,0 +1,201 @@
+"""python -m unittest discover -s tests -v   (표준 라이브러리만, 네트워크는 127.0.0.1 만 사용)"""
+import gzip
+import io
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "launcher" / "rakmu"))
+
+from arena.config import Config  # noqa: E402
+from arena.db import Database  # noqa: E402
+from arena.games import rakmu  # noqa: E402
+from arena.rakmu_server import RakmuServerSource  # noqa: E402
+from arena.store import Store  # noqa: E402
+from arena.web import make_server  # noqa: E402
+import arena_upload  # noqa: E402
+
+
+def make_rkr(players, slots, races=None, date="2026-11-21T20:00:00", seed=1234, mapname="DATA\\MAPS\\[2]Distant.rkm",
+             final_buildings=None, duration=300.0, truncated=False) -> bytes:
+    """players: [(index, name)]; final_buildings: {owner: count} 마지막 장면 건물 수."""
+    head = {"format": 3, "date": date, "map": mapname, "map_rkm": "",
+            "players": [{"index": i, "name": n, "race": (races or [0] * 8)[i]} for i, n in players],
+            "types": {}, "local": players[0][0], "seed": seed, "options": "", "frame0": 1, "commands": True,
+            "races": races or [0, 1, 3, 3, 3, 3, 3, 3], "slots": slots}
+    units, uid = [], 1
+    for owner, n in (final_buildings or {}).items():
+        for _ in range(n):
+            units.append([uid, 10, owner, 100, 100, 500, 1])
+            uid += 1
+    lines = [json.dumps(head), json.dumps({"t": 0.0, "k": [[900, 5, 0, 1, 1, 50, 0], [901, 5, 1, 1, 1, 50, 0]]}),
+             json.dumps({"t": duration, "k": units})]
+    raw = ("\n".join(lines) + "\n").encode()
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as g:
+        g.write(raw)
+    data = buf.getvalue()
+    return data[:-10] if truncated else data
+
+
+class FakeSource(RakmuServerSource):
+    def __init__(self, raw):
+        super().__init__(file="x")
+        self.raw = raw
+
+    def records(self, force=False):
+        from arena.rakmu_server import ServerRecord
+        return [ServerRecord(r) for r in self.raw]
+
+
+def new_store(tmp, raw=None):
+    db = Database(Path(tmp) / "a.sqlite3")
+    return Store(db, Path(tmp) / "replays", FakeSource(raw) if raw is not None else None, 15)
+
+
+class ParseTests(unittest.TestCase):
+    def test_single_vs_computer_is_not_multiplayer(self):
+        info = rakmu.parse_replay(make_rkr([(0, "aa")], [32, 16, 0, 0, 0, 0, 0, 0]))
+        self.assertEqual(info.human_slots, 1)
+        self.assertEqual(info.computers, 1)
+        self.assertFalse(rakmu.is_multiplayer(info))
+
+    def test_two_humans_and_inferred_result(self):
+        info = rakmu.parse_replay(make_rkr([(0, "aa"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0],
+                                           final_buildings={0: 3, 1: 0}, duration=512.5))
+        self.assertTrue(rakmu.is_multiplayer(info))
+        self.assertEqual(info.duration, 512.5)
+        self.assertEqual(info.map_name, "(2) Distant")
+        self.assertEqual(info.inferred_results(), {0: "win", 1: "lose"})
+
+    def test_garbage_rejected(self):
+        with self.assertRaises(rakmu.ReplayError):
+            rakmu.parse_replay(b"not a replay")
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_single_player_rejected_and_not_stored(self):
+        st = new_store(self.tmp)
+        r = st.ingest("rakmu", make_rkr([(0, "aa")], [32, 16, 0, 0, 0, 0, 0, 0]), "x.rkr", "aa")
+        self.assertFalse(r.ok)
+        self.assertEqual(st.db.one("SELECT COUNT(*) n FROM matches")["n"], 0)
+        self.assertEqual(list(Path(self.tmp, "replays").rglob("*.rkr")), [])
+
+    def test_two_povs_merge_and_duplicate(self):
+        st = new_store(self.tmp)
+        a = make_rkr([(0, "aa"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0], final_buildings={0: 2, 1: 0})
+        b = make_rkr([(0, "aa"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0], date="2026-11-21T20:00:01",
+                     final_buildings={0: 2, 1: 0}, duration=301)
+        r1 = st.ingest("rakmu", a, "a.rkr", "aa")
+        r2 = st.ingest("rakmu", b, "b.rkr", "bb")
+        r3 = st.ingest("rakmu", a, "a.rkr", "aa")
+        self.assertEqual((r1.status, r2.status, r3.status), ("created", "merged", "duplicate"))
+        self.assertEqual(r1.match_hash, r2.match_hash)
+        total, rows = st.match_rows("rakmu")
+        self.assertEqual(total, 1)
+        self.assertEqual(len(rows[0]["replays"]), 2)
+        self.assertEqual({p["name"]: p["result"] for p in rows[0]["players"]}, {"aa": "win", "bb": "lose"})
+        self.assertEqual(rows[0]["result_source"], "replay")
+
+    def test_server_record_fills_missing_name_and_results(self):
+        raw = [{"time": "2026-11-21 19:59:50", "map": "[2]Distant", "players": ["aa", "상대"], "room": "r",
+                "results": {"aa": {"code": 0x82, "score": -10}, "상대": {"code": 0x81, "score": 10}}}]
+        st = new_store(self.tmp, raw)
+        data = make_rkr([(0, "aa")], [32, 32, 0, 0, 0, 0, 0, 0], races=[1, 2, 3, 3, 3, 3, 3, 3])
+        r = st.ingest("rakmu", data, "c.rkr", "aa")
+        self.assertTrue(r.ok, r.message)
+        m = st.match("rakmu", r.match_hash)
+        self.assertEqual(m["gametype"], "rank")
+        self.assertEqual(m["result_source"], "server")
+        self.assertEqual({p["name"]: (p["race"], p["result"]) for p in m["players"]},
+                         {"aa": (1, "lose"), "상대": (2, "win")})
+
+    def test_missing_opponent_without_server_record_rejected(self):
+        st = new_store(self.tmp, [])
+        r = st.ingest("rakmu", make_rkr([(0, "aa")], [32, 32, 0, 0, 0, 0, 0, 0]), "d.rkr", "aa")
+        self.assertFalse(r.ok)
+
+    def test_sync_applies_late_server_results(self):
+        raw = [{"time": "2026-11-21 20:00:05", "map": "m", "players": ["aa", "bb"], "results": {}}]
+        st = new_store(self.tmp, raw)
+        import datetime as dt
+        now = dt.datetime.now().replace(microsecond=0)
+        raw[0]["time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+        r = st.ingest("rakmu", make_rkr([(0, "aa"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0], date=now.isoformat()), "e.rkr")
+        self.assertIsNone(st.match("rakmu", r.match_hash)["result_source"])
+        raw[0]["results"] = {"aa": {"code": 2}, "bb": {"code": 1}}
+        self.assertEqual(st.sync_rakmu_results(), 1)
+        m = st.match("rakmu", r.match_hash)
+        self.assertEqual({p["name"]: p["result"] for p in m["players"]}, {"aa": "lose", "bb": "win"})
+        lb = st.leaderboard("rakmu")
+        self.assertEqual([(x["name"], x["points"]) for x in lb], [("bb", 1010), ("aa", 990)])
+
+
+class HttpTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ.update({"ARENA_DATA_DIR": self.tmp, "ARENA_PORT": "0", "ARENA_HOST": "127.0.0.1",
+                           "ARENA_UPLOAD_TOKEN": "test-token", "RAKMU_MATCHES_FILE": "", "RAKMU_MATCHES_URL": ""})
+        self.httpd, self.store = make_server(Config())
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def get(self, path):
+        with urllib.request.urlopen(self.url + path, timeout=5) as r:
+            return r.status, r.read(), r.headers
+
+    def test_launcher_upload_pages_and_download(self):
+        rdir = Path(self.tmp, "launcher_replays")
+        rdir.mkdir()
+        multi = make_rkr([(0, "용사"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0], final_buildings={0: 0, 1: 4})
+        (rdir / "20261121_200000_[2]Distant.rkr").write_bytes(multi)
+        (rdir / "20261121_210000_[2]Distant.rkr").write_bytes(make_rkr([(0, "용사")], [32, 16, 0, 0, 0, 0, 0, 0]))
+        (rdir / "20261121_220000_[2]Distant.rkr").write_bytes(make_rkr([(0, "a"), (1, "b")], [32, 32] + [0] * 6,
+                                                                        truncated=True))
+        bad = arena_upload.ArenaUploader(self.tmp, rdir, self.url, "wrong")
+        self.assertEqual(bad.scan_once(now=time.time() + 60)[0][1], "auth")
+        up = arena_upload.ArenaUploader(self.tmp, rdir, self.url, "test-token", account_fn=lambda: "용사")
+        rows = {name: status for name, status, _ in up.scan_once(now=time.time() + 60)}
+        self.assertEqual(rows, {"20261121_200000_[2]Distant.rkr": "uploaded",
+                                "20261121_210000_[2]Distant.rkr": "skipped"})   # 잘린 파일은 기록 중으로 보고 대기
+        self.assertEqual(up.scan_once(now=time.time() + 60), [])               # 다시 올리지 않음
+
+        code, body, _ = self.get("/rakmu/matches")
+        html = body.decode()
+        self.assertEqual(code, 200)
+        self.assertIn("용사", html)
+        self.assertIn("(2) Distant", html)
+        self.assertIn("리플레이 ⬇", html)
+        h = self.store.match_rows("rakmu")[1][0]["hash"]
+        code, data, headers = self.get(f"/download/{h}")
+        self.assertEqual(data, multi)
+        self.assertIn("attachment", headers["Content-Disposition"])
+        for p in ("/rakmu/", "/rakmu/stats", "/rakmu/maps", "/rakmu/player/%EC%9A%A9%EC%82%AC", "/iop/",
+                  "/rakmu/matches?player=bb&race=1&gametype=normal", "/api/rakmu/matches.json"):
+            self.assertEqual(self.get(p)[0], 200, p)
+        self.assertEqual(self.store.match_rows("rakmu")[1][0]["downloads"], 1)
+
+    def test_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.get("/nope/x")
+        self.assertEqual(cm.exception.code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
