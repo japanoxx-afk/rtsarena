@@ -22,7 +22,7 @@
 | 업로드 API `POST /api/rakmu/replays` + 싱글 거절 | 구현, 테스트 통과 |
 | 런처 자동 업로드 모듈 `launcher/rakmu/arena_upload.py` | 구현, 테스트 통과 |
 | 실제 리플레이 4개로 판정 확인 (C:\Users\seo\Downloads\replays) | 싱글 3개 skip, 대전 1개 upload — 맞음 |
-| new-rakum 런처에 연결 | **안 함** — `docs/LAUNCHER_INTEGRATION.md` 순서대로 |
+| new-rakum 런처에 연결 | **완료, 로컬 커밋만 (푸시 안 함)** — new-rakum 브랜치 `launcher-v0.9062-arena-upload` 커밋 7effd80, 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). 런처 15초 실행 확인, 테스트 41개 통과 |
 | NAS 배포 (Portainer 스택) | **안 함** — `deploy/compose.yaml` + 아래 5장 |
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
@@ -117,7 +117,8 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 
 ## 8. 다음 할 일 (순서)
 
-1. new-rakum 런처에 `arena_upload.py` 연결 (docs/LAUNCHER_INTEGRATION.md) + 토큰 GitHub Secret.
+1. new-rakum 에 GitHub Secret `ARENA_UPLOAD_TOKEN` 추가 → `launcher-v0.9062-arena-upload` 브랜치 푸시(CI 가 exe 빌드) → main 병합.
+   arena_upload.py 를 고치면 rtsarena `launcher/rakmu/` 와 new-rakum 루트 두 곳을 똑같이 맞춘다.
 2. NAS 에 rtsarena 스택 배포 (5장), 외부 포트 확인.
 3. 리플레이 기록기에서 상대 이름 채우기, 결과코드 기록 (docs/RAKMU_SERVER_CHANGES.md A-1, A-2).
 4. 로비 서버 경기 ID (B-1).
@@ -128,3 +129,5 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 ## 9. 작업 기록
 
 - 2026-11-21: 저장소 생성, 사이트·업로드 API·런처 모듈·테스트·문서 작성. 실제 리플레이 4개로 판정 확인.
+- 2026-11-21: new-rakum 런처 v0.9062 에 자동 업로드 연결 (브랜치 launcher-v0.9062-arena-upload, 미푸시).
+  올린 사람 = 리플레이 머리의 내 플레이어(local) 이름.
