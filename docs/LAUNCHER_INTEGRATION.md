@@ -1,7 +1,7 @@
 # 라크무 런처에 자동 업로드 붙이기
 
 대상 저장소: `japanoxx-afk/new-rakum` (라크무 런처 `launcher.py`, PyInstaller 로 exe 빌드)
-**반영 완료: new-rakum 런처 v0.9062, 브랜치 `launcher-v0.9062-arena-upload` (커밋 7effd80, 아직 푸시 안 함).**
+**반영 완료: new-rakum 런처 v0.9063, 브랜치 `launcher-v0.9063-arena-upload` (푸시함, main 미병합).**
 아래는 넣은 내용의 기록이다. 실제 코드는 토큰을 빌드 때 GitHub Secret 으로 `arena_secret.py` 를 만들어 넣는다
 (`launcher.py`: `from arena_secret import ARENA_TOKEN`, 파일이 없으면 빈 토큰). 아래 코드 예시는 설명용.
 

@@ -22,7 +22,7 @@
 | 업로드 API `POST /api/rakmu/replays` + 싱글 거절 | 구현, 테스트 통과 |
 | 런처 자동 업로드 모듈 `launcher/rakmu/arena_upload.py` | 구현, 테스트 통과 |
 | 실제 리플레이 4개로 판정 확인 (C:\Users\seo\Downloads\replays) | 싱글 3개 skip, 대전 1개 upload — 맞음 |
-| new-rakum 런처에 연결 | **완료, 로컬 커밋만 (푸시 안 함)** — new-rakum 브랜치 `launcher-v0.9062-arena-upload` 커밋 7effd80, 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). 런처 15초 실행 확인, 테스트 41개 통과 |
+| new-rakum 런처에 연결 | **v0.9063, 브랜치 `launcher-v0.9063-arena-upload` 푸시함 (main 미병합)** — v0.9061(NAS 기본 서버) + main 의 v0.9062(벽 브러시) + 업로드. 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). CI 테스트 목록 93개 통과, 런처 15초 실행 확인. GitHub Secret ARENA_UPLOAD_TOKEN 등록됨(사용자) |
 | NAS 배포 (Portainer 스택) | **완료 2026-11-21** — http://akansas.synology.me:30013/ , 컨테이너 rtsarena-web healthy |
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
@@ -117,7 +117,8 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 
 ## 8. 다음 할 일 (순서)
 
-1. new-rakum 에 GitHub Secret `ARENA_UPLOAD_TOKEN` 추가 → `launcher-v0.9062-arena-upload` 브랜치 푸시(CI 가 exe 빌드) → main 병합.
+1. `launcher-v0.9063-arena-upload` 의 CI exe 로 실제 대전 1판 → 사이트에 올라오는지 확인 → main 병합(= 사용자 자동 업데이트).
+   주의: main 에는 v0.9061(NAS 기본 서버)이 없었다. 이 브랜치를 병합하면 v0.9061 도 함께 배포된다.
    arena_upload.py 를 고치면 rtsarena `launcher/rakmu/` 와 new-rakum 루트 두 곳을 똑같이 맞춘다.
 2. ~~NAS 에 rtsarena 스택 배포~~ (2026-11-21 완료).
 3. 리플레이 기록기에서 상대 이름 채우기, 결과코드 기록 (docs/RAKMU_SERVER_CHANGES.md A-1, A-2).
@@ -129,7 +130,8 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 ## 9. 작업 기록
 
 - 2026-11-21: 저장소 생성, 사이트·업로드 API·런처 모듈·테스트·문서 작성. 실제 리플레이 4개로 판정 확인.
-- 2026-11-21: new-rakum 런처 v0.9062 에 자동 업로드 연결 (브랜치 launcher-v0.9062-arena-upload, 미푸시).
+- 2026-11-21: new-rakum 런처에 자동 업로드 연결. 처음 v0.9062 로 만들었으나 main 이 이미 다른 v0.9062(벽 브러시)를
+  배포해서 main 을 병합하고 v0.9063 으로 올림 (브랜치 launcher-v0.9063-arena-upload, 커밋 62d1c94 푸시).
   올린 사람 = 리플레이 머리의 내 플레이어(local) 이름.
 - 2026-11-21: NAS 배포 완료. 스택 rtsarena / 컨테이너 rtsarena-web healthy. 외부 확인:
   http://akansas.synology.me:30013/ (= 112.159.73.235:30013) healthz 200, 전적 페이지 200, 토큰 없는 업로드 401.
