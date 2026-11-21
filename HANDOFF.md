@@ -23,7 +23,7 @@
 | 런처 자동 업로드 모듈 `launcher/rakmu/arena_upload.py` | 구현, 테스트 통과 |
 | 실제 리플레이 4개로 판정 확인 (C:\Users\seo\Downloads\replays) | 싱글 3개 skip, 대전 1개 upload — 맞음 |
 | new-rakum 런처에 연결 | **완료, 로컬 커밋만 (푸시 안 함)** — new-rakum 브랜치 `launcher-v0.9062-arena-upload` 커밋 7effd80, 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). 런처 15초 실행 확인, 테스트 41개 통과 |
-| NAS 배포 (Portainer 스택) | **안 함** — `deploy/compose.yaml` + 아래 5장 |
+| NAS 배포 (Portainer 스택) | **완료 2026-11-21** — http://akansas.synology.me:30013/ , 컨테이너 rtsarena-web healthy |
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
 
@@ -67,7 +67,7 @@ tools/demo_seed.py               가짜 경기 30개
 - **알려진 문제**: 대전 리플레이에서 상대 이름이 빈 문자열. 사이트가 로비 서버 기록으로 채우고, 못 채우면 거절한다.
 - 원본 코드: new-rakum `replay_recorder.py`, `replay_memory.py`, `replay_model.py`.
 
-## 5. NAS 배포 순서 (아직 안 함) — 클릭 순서는 deploy/NAS_DEPLOY.md, 올릴 파일은 deploy/Prepare-NasUpload.ps1
+## 5. NAS 배포 순서 (완료, 코드 업데이트 때도 같은 순서) — 클릭 순서는 deploy/NAS_DEPLOY.md, 올릴 파일은 deploy/Prepare-NasUpload.ps1
 
 1. File Station: `game-servers/rtsarena/app/` 만들고 이 저장소의 `arena/` 폴더를 통째로 올린다
    (`__pycache__` 제외) → `game-servers/rtsarena/app/arena/__main__.py` 가 있어야 함. `game-servers/rtsarena/data/` 도 만든다.
@@ -119,7 +119,7 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 
 1. new-rakum 에 GitHub Secret `ARENA_UPLOAD_TOKEN` 추가 → `launcher-v0.9062-arena-upload` 브랜치 푸시(CI 가 exe 빌드) → main 병합.
    arena_upload.py 를 고치면 rtsarena `launcher/rakmu/` 와 new-rakum 루트 두 곳을 똑같이 맞춘다.
-2. NAS 에 rtsarena 스택 배포 (5장), 외부 포트 확인.
+2. ~~NAS 에 rtsarena 스택 배포~~ (2026-11-21 완료).
 3. 리플레이 기록기에서 상대 이름 채우기, 결과코드 기록 (docs/RAKMU_SERVER_CHANGES.md A-1, A-2).
 4. 로비 서버 경기 ID (B-1).
 5. 맵 미리보기 이미지: 리플레이 머리 `map_rkm`(base64 맵 원본)으로 new-rakum `map_preview.py` 를 써서 썸네일 생성.
@@ -131,3 +131,7 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 - 2026-11-21: 저장소 생성, 사이트·업로드 API·런처 모듈·테스트·문서 작성. 실제 리플레이 4개로 판정 확인.
 - 2026-11-21: new-rakum 런처 v0.9062 에 자동 업로드 연결 (브랜치 launcher-v0.9062-arena-upload, 미푸시).
   올린 사람 = 리플레이 머리의 내 플레이어(local) 이름.
+- 2026-11-21: NAS 배포 완료. 스택 rtsarena / 컨테이너 rtsarena-web healthy. 외부 확인:
+  http://akansas.synology.me:30013/ (= 112.159.73.235:30013) healthz 200, 전적 페이지 200, 토큰 없는 업로드 401.
+  배포 중 겪은 문제: ① File Station 폴더 업로드로 arena 위치가 어긋남 → app/arena/__main__.py 위치 확인이 핵심.
+  ② NAS 볼륨에서 SQLite WAL 이 'database is locked' → 일반 저널 + 잠금 실패 시 nolock 으로 고침(db.py).
