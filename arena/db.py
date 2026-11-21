@@ -55,6 +55,12 @@ CREATE INDEX IF NOT EXISTS ix_replays_match ON replays(match_id);
 
 # 리플레이에서 뽑은 플레이어 지표 (리플레이가 없는 경기는 NULL)
 PLAYER_STAT_COLUMNS = ("peak_army", "units_made", "buildings_made")
+# 처음 스키마 뒤에 더한 열 (이미 있는 DB 는 열 때 ALTER TABLE 로 추가)
+ADDED_COLUMNS = {
+    "match_players": [(c, "INTEGER") for c in PLAYER_STAT_COLUMNS],
+    # 리플레이 머리의 시드·녹화 시작 시각 — 다시보기 녹화(같은 시드, 늦은 시각) 판별용
+    "replays": [("seed", "INTEGER"), ("rec_date", "TEXT")],
+}
 
 
 class Database:
@@ -94,10 +100,11 @@ class Database:
             mode = "WAL" if os.environ.get("ARENA_SQLITE_WAL") == "1" and not nolock else "DELETE"
             conn.execute(f"PRAGMA journal_mode={mode}")
             conn.executescript(SCHEMA)
-            have = {r[1] for r in conn.execute("PRAGMA table_info(match_players)")}
-            for col in PLAYER_STAT_COLUMNS:
-                if col not in have:
-                    conn.execute(f"ALTER TABLE match_players ADD COLUMN {col} INTEGER")
+            for table, cols in ADDED_COLUMNS.items():
+                have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                for col, typ in cols:
+                    if col not in have:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
             conn.execute("SELECT COUNT(*) FROM matches").fetchone()   # 실제로 읽히는지
             return conn
         except sqlite3.OperationalError:

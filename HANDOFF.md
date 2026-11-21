@@ -147,3 +147,11 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
   ② NAS 볼륨에서 SQLite WAL 이 'database is locked' → 일반 저널 + 잠금 실패 시 nolock 으로 고침(db.py).
 - 2026-11-21: 맵통계를 카드 그리드 + 맵별 상세 창(큰 미리보기, 종족 출전·승률, 상성, 많이 이긴 플레이어, 최근 경기)으로 바꿈.
   미리보기는 런처 map_preview.render_tk 와 같은 실제 타일 그림 + 시작 위치. 전적 카드에도 작은 맵 그림.
+- 2026-11-22: 사이트 랭킹이 게임 안 랭킹과 달랐던 원인 2가지 수정.
+  (1) 런처가 '게임 화면으로 재생'(다시보기)도 녹화해 올려서 같은 경기가 여러 개 생김 (같은 시드 617586081 이 19번 등).
+      같은 시드의 첫 녹화보다 3분 넘게 늦게 시작한 리플레이 = 다시보기 → 업로드는 duplicate 로 받고 저장 안 함,
+      이미 저장된 것은 동기화할 때 리플레이 단위로 지우고 경기(맵·시드·시간)를 바로잡음 (Store.cleanup_playbacks).
+      new-rakum main 의 런처는 recorder.pause_for_playback 으로 다시보기를 녹화하지 않는다(그 전 버전 사용자 대비).
+  (2) matches.json 의 "wl" 은 예전 서버가 점수로 잘못 매긴 값일 수 있음 → 서버 랭킹처럼 결과코드로 다시 판정
+      (rakmu_server.server_results = server.py _recompute_winloss 와 같은 규칙).
+  실제 리플레이 115개 + 실제 matches.json 으로 재현: 경기 17개 → 7개, 리더보드 = 게임 안 랭킹 (완전 일치).

@@ -589,10 +589,13 @@ def start_sync_thread(cfg: Config, store: Store) -> threading.Thread:
             s = store.import_rakmu_records()
             SYNC_STATUS.update(error=store.rakmu.last_error, server_records=len(store.rakmu.records()),
                                created=s["created"], linked=s["linked"], results=s["results"],
+                               playbacks_removed=SYNC_STATUS.get("playbacks_removed", 0) + s.get("playbacks_removed", 0),
                                mismatch=len(s["mismatch"]))
             if s["created"] or s["linked"] or s["results"]:
                 log.info("로비 서버 동기화: 새 경기 %d, 리플레이 경기 연결 %d, 승패 반영 %d",
                          s["created"], s["linked"], s["results"])
+            if s.get("playbacks_removed"):
+                log.info("다시보기 녹화 리플레이 %d개 정리", s["playbacks_removed"])
             if s["mismatch"]:
                 log.warning("게임 안 랭킹과 다른 계정 %d명: %s", len(s["mismatch"]), ", ".join(s["mismatch"][:20]))
         except Exception as e:  # noqa: BLE001

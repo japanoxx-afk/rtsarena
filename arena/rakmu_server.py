@@ -30,26 +30,45 @@ def code_wl(code):
         return None
 
 
+def server_results(res: dict) -> dict:
+    """{계정: win/lose/draw} — new-rakum server.py 의 _recompute_winloss + compute_ranking 과 똑같은 규칙.
+
+    결과코드가 있으면 코드로 판정한다 (파일에 저장된 "wl" 은 예전 버전이 점수로 잘못 매긴 값일 수 있어 쓰지 않는다).
+    코드를 모르는 계정끼리는 점수 비교(최고점이 여럿이면 그들은 무승부). dict 가 아닌 값은 서버 랭킹도 세지 않는다.
+    """
+    out, unknown = {}, {}
+    for acc, v in res.items():
+        if not isinstance(v, dict) or not acc:
+            continue
+        wl = code_wl(v.get("code"))
+        if wl:
+            out[str(acc)] = wl
+        else:
+            unknown[str(acc)] = v
+    if unknown:
+        scores = {a: v.get("score", 0) for a, v in unknown.items()}
+        top = max(scores.values())
+        n_top = sum(1 for x in scores.values() if x == top)
+        for a, sc in scores.items():
+            out[a] = "draw" if n_top > 1 and sc == top else ("win" if sc == top else "lose")
+    return out
+
+
 class ServerRecord:
     def __init__(self, raw: dict):
         self.raw = raw
         self.time = parse_time(raw.get("time", ""))
         self.map = str(raw.get("map") or "")
         self.players = [str(p) for p in raw.get("players") or [] if p]
-        self.results = {}
+        self.results = server_results(raw.get("results") or {})
         self.ladder = False
-        for acc, v in (raw.get("results") or {}).items():
+        for v in (raw.get("results") or {}).values():
             if isinstance(v, dict):
-                wl = v.get("wl") or code_wl(v.get("code"))
                 try:
                     if int(v.get("code", 0)) & LADDER_BIT:
                         self.ladder = True
                 except (TypeError, ValueError):
                     pass
-            else:
-                wl = v if v in ("win", "lose", "draw") else None
-            if wl:
-                self.results[str(acc)] = wl
 
     @property
     def ref(self) -> str:

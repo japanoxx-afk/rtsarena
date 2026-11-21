@@ -29,6 +29,12 @@ def main():
         logging.getLogger("arena").error("시작 실패:\n%s", traceback.format_exc())
         raise
     try:
+        n = store.cleanup_playbacks()
+        if n:
+            logging.getLogger("arena").info("다시보기 녹화 리플레이 %d개 정리", n)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("arena").exception("다시보기 녹화 정리 실패")
+    try:
         n = store.backfill_player_stats()
         if n:
             logging.getLogger("arena").info("예전 리플레이 %d개에서 플레이어 지표를 채움", n)

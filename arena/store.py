@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import gzip
+import json
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +24,12 @@ class UploadResult:
     status: str        # created | merged | duplicate | rejected
     message: str
     match_hash: str = ""
+
+
+log = logging.getLogger("arena.store")
+
+# 같은 경기의 리플레이끼리는 시작 시각이 이 안에 있다 (넘으면 다시보기 녹화로 본다)
+PLAYBACK_GAP = dt.timedelta(minutes=3)
 
 
 def _safe_filename(s: str) -> str:
@@ -64,6 +73,10 @@ class Store:
         played = _iso_to_local(info.date)
         if played is None:
             return UploadResult(False, "rejected", "리플레이 날짜를 읽을 수 없습니다")
+        orig = self._original_of_playback(game_key, info, played)
+        if orig:
+            return UploadResult(True, "duplicate",
+                                "이미 기록된 경기를 다시보기한 녹화라서 저장하지 않습니다", orig["hash"])
 
         # 로비 서버 기록으로 이름이 빠진 상대를 채우고 승패를 가져온다
         known = [p.name for p in info.players if p.name]
@@ -133,11 +146,99 @@ class Store:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             self._save_player_stats(c, mid, info, prefer=info.duration >= (m["duration"] or 0) if m else True)
-            c.execute("INSERT INTO replays(match_id,sha256,filename,stored_path,size,duration,uploader)"
-                      " VALUES(?,?,?,?,?,?,?)",
-                      (mid, sha, fname, rel.as_posix(), len(data), info.duration, (uploader or "")[:32] or None))
+            c.execute("INSERT INTO replays(match_id,sha256,filename,stored_path,size,duration,uploader,seed,rec_date)"
+                      " VALUES(?,?,?,?,?,?,?,?,?)",
+                      (mid, sha, fname, rel.as_posix(), len(data), info.duration, (uploader or "")[:32] or None,
+                       info.seed, played.strftime("%Y-%m-%d %H:%M:%S")))
         msg = "새 경기로 저장했습니다" if status == "created" else "같은 경기에 리플레이를 추가했습니다"
         return UploadResult(True, status, msg, mhash)
+
+    def _original_of_playback(self, game_key, info, played):
+        """이미 받은 경기를 다시보기하며 녹화한 파일이면 원래 경기를 돌려준다.
+
+        라크무 런처는 리플레이를 게임 안에서 다시 볼 때도 녹화해서 올린다 (2026-11-21~22 실제 확인:
+        같은 시드 617586081 이 14:29~15:46 에 19번). 진짜 경기는 시드가 매번 새로 정해지고,
+        같은 경기의 상대 리플레이는 녹화 시작 시각이 몇 초밖에 차이 나지 않는다.
+        → 같은 시드의 리플레이가 이미 있고, 이 파일이 그보다 PLAYBACK_GAP 넘게 늦게 시작했으면 다시보기.
+        """
+        if info.seed is None:
+            return None
+        first = self.db.one("SELECT MIN(rec_date) d FROM replays r JOIN matches m ON m.id=r.match_id"
+                            " WHERE m.game=? AND r.seed=? AND r.rec_date > ''", (game_key, info.seed))["d"]
+        if not first:
+            return None
+        t0 = dt.datetime.strptime(first, "%Y-%m-%d %H:%M:%S")
+        if (played - t0) <= PLAYBACK_GAP:
+            return None                  # 같은 경기의 다른 사람 리플레이 → 원래대로 합친다
+        return self.db.one("SELECT m.* FROM replays r JOIN matches m ON m.id=r.match_id"
+                           " WHERE m.game=? AND r.seed=? AND r.rec_date=? LIMIT 1", (game_key, info.seed, first))
+
+    def _fill_replay_heads(self):
+        """seed/rec_date 열이 생기기 전에 올라온 리플레이의 머리만 읽어 채운다 (한 번만)."""
+        for r in self.db.q("SELECT id, stored_path FROM replays WHERE rec_date IS NULL"):
+            seed, when = None, ""
+            try:
+                with gzip.open(self.replay_dir / r["stored_path"]) as g:
+                    head = json.loads(g.readline().decode("utf-8"))
+                seed = head.get("seed") if isinstance(head.get("seed"), int) else None
+                t = _iso_to_local(str(head.get("date") or ""))
+                when = t.strftime("%Y-%m-%d %H:%M:%S") if t else ""
+            except Exception:  # noqa: BLE001 - 못 읽는 파일은 판별에서 뺀다
+                pass
+            self.db.run("UPDATE replays SET seed=?, rec_date=? WHERE id=?", (seed, when, r["id"]))
+
+    def cleanup_playbacks(self) -> int:
+        """이미 저장된 '다시보기 녹화' 리플레이를 지우고 경기를 바로잡는다. 지운 리플레이 수를 돌려준다.
+
+        - 같은 시드에서 가장 먼저 녹화된 리플레이보다 PLAYBACK_GAP 넘게 늦게 시작한 리플레이 = 다시보기 → 삭제.
+        - 리플레이가 하나도 안 남은 경기: 로비 서버 기록이 없으면 삭제, 있으면 맵·시드·시간을 서버 기록 기준으로 되돌림.
+        - 남은 리플레이가 있으면 맵·시드·시간을 가장 긴 남은 리플레이 기준으로 다시 맞추고 플레이어 지표를 다시 계산.
+        """
+        self._fill_replay_heads()
+        bad = self.db.q(
+            "SELECT r.id, r.match_id, r.stored_path, r.rec_date FROM replays r"
+            " JOIN (SELECT seed, MIN(rec_date) first FROM replays WHERE seed IS NOT NULL AND rec_date > '' GROUP BY seed) f"
+            " ON f.seed=r.seed WHERE r.rec_date > datetime(f.first, ?)",
+            (f"+{int(PLAYBACK_GAP.total_seconds())} seconds",))
+        if not bad:
+            return 0
+        affected = sorted({r["match_id"] for r in bad})
+        with self.db.tx() as c:
+            for r in bad:
+                c.execute("DELETE FROM replays WHERE id=?", (r["id"],))
+        for r in bad:
+            try:
+                (self.replay_dir / r["stored_path"]).unlink()
+            except OSError:
+                pass
+        recs = {}
+        if self.rakmu.configured:
+            recs = {rec.ref: rec for rec in self.rakmu.records()}
+        for mid in affected:
+            m = self.db.one("SELECT * FROM matches WHERE id=?", (mid,))
+            left = self.db.q("SELECT stored_path, duration FROM replays WHERE match_id=? ORDER BY duration DESC", (mid,))
+            with self.db.tx() as c:
+                c.execute("UPDATE match_players SET peak_army=NULL, units_made=NULL, buildings_made=NULL WHERE match_id=?",
+                          (mid,))
+                if left:
+                    try:
+                        info = rakmu.parse_replay((self.replay_dir / left[0]["stored_path"]).read_bytes())
+                        c.execute("UPDATE matches SET seed=?, map_path=?, map_name=?, duration=? WHERE id=?",
+                                  (info.seed, info.map_path, info.map_name, info.duration, mid))
+                    except (OSError, rakmu.ReplayError):
+                        pass
+                elif m["server_ref"]:
+                    rec = recs.get(m["server_ref"])
+                    c.execute("UPDATE matches SET seed=NULL, duration=0, map_path=?, map_name=? WHERE id=?",
+                              (rec.map if rec else m["map_path"], rakmu.map_display(rec.map) if rec else m["map_name"], mid))
+                    c.execute("UPDATE match_players SET race=NULL WHERE match_id=?", (mid,))
+                else:
+                    c.execute("DELETE FROM match_players WHERE match_id=?", (mid,))
+                    c.execute("DELETE FROM matches WHERE id=?", (mid,))
+                    log.info("다시보기 녹화로만 이루어진 경기 삭제: #%s %s", mid, m["played_at"])
+        self.backfill_player_stats()
+        log.info("다시보기 녹화 리플레이 %d개 삭제 (경기 %d개 정리)", len(bad), len(affected))
+        return len(bad)
 
     def _find_same_match(self, c, game_key, info, played):
         lo = (played - dt.timedelta(minutes=self.window)).strftime("%Y-%m-%d %H:%M:%S")
@@ -211,6 +312,7 @@ class Store:
         if not self.rakmu.configured:
             return stats
         recs = self.rakmu.records(force=True)
+        stats["playbacks_removed"] = self.cleanup_playbacks()
         with self.db.tx() as c:
             for rec in recs:
                 names = list(dict.fromkeys(rec.players))

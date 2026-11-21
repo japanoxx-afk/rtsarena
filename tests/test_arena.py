@@ -196,6 +196,51 @@ class RankingSyncTests(unittest.TestCase):
                          {"aa": (1, "win"), "bb": (2, "lose")})
         self.assertEqual((m["duration"], m["map_name"], len(m["replays"])), (420, "(2) Distant", 1))
 
+    def test_result_uses_code_not_stored_wl(self):
+        """2026-11-22 NAS: 예전 서버가 점수로 매긴 "wl": "draw" 가 파일에 남아 있었다. 서버 랭킹은 코드로 다시 판정한다."""
+        raw = [{"time": "2026-11-21 03:08:46", "map": "[2]Distant.rkm", "players": ["aa", "zz"],
+                "results": {"aa": {"code": 1, "score": 0, "wl": "draw"}, "zz": {"code": 2, "score": 0, "wl": "draw"}}},
+               {"id": "s1", "time": "2026-11-21 04:00:00", "map": "m", "players": ["aa", "zz"],      # 코드 없음 → 점수
+                "results": {"aa": {"score": 5}, "zz": {"score": 2}}}]
+        st = new_store(self.tmp, raw)
+        st.import_rakmu_records()
+        lb = {r["name"]: (r["w"], r["l"], r["d"]) for r in st.leaderboard("rakmu")}
+        self.assertEqual(lb, {"aa": (2, 0, 0), "zz": (0, 2, 0)})
+
+    def test_playback_recordings_are_not_new_matches(self):
+        """런처가 다시보기를 녹화해 올린다: 같은 시드, 늦은 녹화 시각 → 새 경기가 아니다 (지금 받을 때와 예전 데이터 정리 둘 다)."""
+        raw = [{"id": "g1", "time": "2026-11-21 20:00:00", "map": "[2]Distant", "players": ["aa", "bb"],
+                "results": {"aa": {"code": 1}, "bb": {"code": 2}}}]
+        real = make_rkr([(0, "aa"), (1, "bb")], [32, 32] + [0] * 6, seed=777, date="2026-11-21T20:00:04", duration=600)
+        other = make_rkr([(1, "bb"), (0, "aa")], [32, 32] + [0] * 6, seed=777, date="2026-11-21T20:00:05", duration=590)
+        plays = [make_rkr([(0, "aa"), (1, "bb")], [32, 32] + [0] * 6, seed=777, date=f"2026-11-21T{h}:00", duration=d)
+                 for h, d in (("20:40", 120), ("21:10", 600), ("22:30", 30))]
+        st = new_store(self.tmp, raw)
+        st.import_rakmu_records()
+        self.assertEqual(st.ingest("rakmu", real, "a.rkr", "aa").status, "merged")
+        self.assertEqual(st.ingest("rakmu", other, "b.rkr", "bb").status, "merged")      # 상대 리플레이는 합친다
+        for i, data in enumerate(plays):
+            self.assertEqual(st.ingest("rakmu", data, f"p{i}.rkr", "aa").status, "duplicate")
+        self.assertEqual(st.match_rows("rakmu")[0], 1)
+        self.assertEqual(len(st.match_rows("rakmu")[1][0]["replays"]), 2)
+
+        # 예전 코드로 이미 받아 둔 다시보기: 서버 경기에 끼어든 것 + 따로 생긴 경기 → 정리
+        st2 = new_store(tempfile.mkdtemp(), raw)
+        st2._original_of_playback = lambda *a: None
+        st2.ingest("rakmu", plays[0], "p0.rkr", "aa")          # 진짜보다 먼저 와서 서버 경기(20:00)에 붙음
+        st2.ingest("rakmu", real, "a.rkr", "aa")
+        st2.ingest("rakmu", plays[2], "p2.rkr", "aa")          # 22:30 → 새 경기
+        del st2._original_of_playback
+        st2.db.run("UPDATE replays SET seed=NULL, rec_date=NULL")   # 열이 생기기 전 DB
+        self.assertEqual(st2.import_rakmu_records()["playbacks_removed"], 2)   # 동기화할 때 정리된다
+        total, rows = st2.match_rows("rakmu")
+        self.assertEqual(total, 1)
+        m = rows[0]
+        self.assertEqual((m["server_ref"], m["duration"], len(m["replays"])), ("id:g1", 600, 1))
+        self.assertEqual({p["name"]: p["result"] for p in m["players"]}, {"aa": "win", "bb": "lose"})
+        self.assertEqual(len(list((Path(st2.replay_dir)).rglob("*.rkr"))), 1)      # 파일도 지움
+        self.assertEqual(st2.cleanup_playbacks(), 0)
+
 
 class HttpTests(unittest.TestCase):
     def setUp(self):
