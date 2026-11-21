@@ -16,6 +16,7 @@ import io
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 KEY = "rakmu"
 TITLE = "라크무"
@@ -80,6 +81,39 @@ def map_display(path: str) -> str:
     if m:
         return f"({m.group(1)}) {m.group(2).strip()}"
     return base or "알 수 없는 맵"
+
+
+# ---------------------------------------------------------------- 맵 목록·미리보기 (tools/render_map_previews.py 가 만든다)
+_CATALOG_FILE = Path(__file__).with_name("rakmu_maps.json")
+_catalog: list | None = None
+
+
+def map_catalog() -> list[dict]:
+    """[{name, file, image, width, height, players, tileset, size, gold, gold_total, wells, official}]"""
+    global _catalog
+    if _catalog is None:
+        try:
+            _catalog = json.loads(_CATALOG_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _catalog = []
+    return _catalog
+
+
+def map_info(name: str) -> dict | None:
+    for m in map_catalog():
+        if m["name"] == name:
+            return m
+    low = (name or "").lower()
+    for m in map_catalog():
+        if m["name"].lower() == low:
+            return m
+    return None
+
+
+def map_image(name: str) -> str:
+    """미리보기 그림 주소 (없으면 빈 문자열)."""
+    m = map_info(name)
+    return f"/static/maps/rakmu/{m['image']}" if m else ""
 
 
 def _open_lines(data: bytes):

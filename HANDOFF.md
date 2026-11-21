@@ -44,6 +44,7 @@ launcher/rakmu/arena_upload.py   라크무 런처용 (new-rakum 으로 복사해
 deploy/compose.yaml              NAS Portainer 스택
 tests/test_arena.py              단위 + HTTP 종단 시험 (10개)
 tools/demo_seed.py               가짜 경기 30개
+tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (게임 설치 PC, Tk 사용)
 .claude/launch.json              Claude Code 미리보기용 (data-demo 로 실행)
 ```
 
@@ -128,7 +129,9 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 2. ~~NAS 에 rtsarena 스택 배포~~ (2026-11-21 완료).
 3. 리플레이 기록기에서 상대 이름 채우기, 결과코드 기록 (docs/RAKMU_SERVER_CHANGES.md A-1, A-2).
 4. ~~로비 서버 경기 ID·500판 제한·원자적 저장~~ (서버 0.9017, 브랜치 launcher-v0.9063-arena-upload). NAS rakmu-live/app 반영 필요.
-5. 맵 미리보기 이미지: 리플레이 머리 `map_rkm`(base64 맵 원본)으로 new-rakum `map_preview.py` 를 써서 썸네일 생성.
+5. ~~맵 미리보기·맵통계~~ (2026-11-21 완료). 새 맵이 생기면 게임이 설치된 PC 에서
+   `python tools/render_map_previews.py --rakum <new-rakum 폴더>` → `arena/static/maps/rakmu/`, `arena/games/rakmu_maps.json` 커밋 후 NAS 에 올린다.
+   목록에 없는 맵(다른 사람이 만든 맵)은 카드에 '미리보기 없음'으로 나온다.
 6. 임팩트 오브 파워: iop 저장소 `REPLAY_RESEARCH.md` 확인 후 `arena/games/iop.py` 추가.
 7. 공지사항·대회 페이지 (참고 사이트에 있음) — 필요하면.
 
@@ -142,3 +145,5 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
   http://akansas.synology.me:30013/ (= 112.159.73.235:30013) healthz 200, 전적 페이지 200, 토큰 없는 업로드 401.
   배포 중 겪은 문제: ① File Station 폴더 업로드로 arena 위치가 어긋남 → app/arena/__main__.py 위치 확인이 핵심.
   ② NAS 볼륨에서 SQLite WAL 이 'database is locked' → 일반 저널 + 잠금 실패 시 nolock 으로 고침(db.py).
+- 2026-11-21: 맵통계를 카드 그리드 + 맵별 상세 창(큰 미리보기, 종족 출전·승률, 상성, 많이 이긴 플레이어, 최근 경기)으로 바꿈.
+  미리보기는 런처 map_preview.render_tk 와 같은 실제 타일 그림 + 시작 위치. 전적 카드에도 작은 맵 그림.

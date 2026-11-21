@@ -1,0 +1,427 @@
+[
+ {
+  "name": "(2) Distant",
+  "file": "[2]Distant.rkm",
+  "image": "1e1c428a567b.png",
+  "width": 384,
+  "height": 384,
+  "players": 2,
+  "tileset": "던전",
+  "size": [
+   96,
+   96
+  ],
+  "gold": 4,
+  "gold_total": 20000,
+  "wells": 4,
+  "official": true
+ },
+ {
+  "name": "(2) Open Battle",
+  "file": "[2]Open Battle.rkm",
+  "image": "0ba037e522be.png",
+  "width": 128,
+  "height": 256,
+  "players": 2,
+  "tileset": "유적",
+  "size": [
+   64,
+   128
+  ],
+  "gold": 7,
+  "gold_total": 35000,
+  "wells": 6,
+  "official": true
+ },
+ {
+  "name": "(2) Pugaranchia",
+  "file": "[2]Pugaranchia.rkm",
+  "image": "1a2e4c1d36a5.png",
+  "width": 384,
+  "height": 256,
+  "players": 2,
+  "tileset": "설원",
+  "size": [
+   96,
+   64
+  ],
+  "gold": 6,
+  "gold_total": 30000,
+  "wells": 6,
+  "official": true
+ },
+ {
+  "name": "(2) Short Time",
+  "file": "[2]Short Time.rkm",
+  "image": "1c436d266ffb.png",
+  "width": 256,
+  "height": 384,
+  "players": 2,
+  "tileset": "설원",
+  "size": [
+   64,
+   96
+  ],
+  "gold": 3,
+  "gold_total": 15000,
+  "wells": 3,
+  "official": true
+ },
+ {
+  "name": "(2) The Final",
+  "file": "[2]The Final.rkm",
+  "image": "4ebe861e2f7b.png",
+  "width": 324,
+  "height": 128,
+  "players": 2,
+  "tileset": "늪지",
+  "size": [
+   162,
+   64
+  ],
+  "gold": 5,
+  "gold_total": 25000,
+  "wells": 4,
+  "official": true
+ },
+ {
+  "name": "(4) Abstruse",
+  "file": "[4]Abstruse.rkm",
+  "image": "650a422111b8.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "유적",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 10,
+  "gold_total": 50000,
+  "wells": 8,
+  "official": true
+ },
+ {
+  "name": "(4) Eternal War",
+  "file": "[4]Eternal War.rkm",
+  "image": "06399829fe7b.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "던전",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 10,
+  "gold_total": 30923769524,
+  "wells": 7,
+  "official": true
+ },
+ {
+  "name": "(4) For South-Conquest",
+  "file": "[4]For South-Conquest.rkm",
+  "image": "e074ab755416.png",
+  "width": 368,
+  "height": 240,
+  "players": 4,
+  "tileset": "설원",
+  "size": [
+   184,
+   120
+  ],
+  "gold": 16,
+  "gold_total": 80000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(4) For South-Conquest2",
+  "file": "[4]For South-Conquest2.rkm",
+  "image": "8dd226b6a5bb.png",
+  "width": 368,
+  "height": 240,
+  "players": 4,
+  "tileset": "던전",
+  "size": [
+   184,
+   120
+  ],
+  "gold": 12,
+  "gold_total": 60000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(4) Four Power",
+  "file": "[4]Four Power.rkm",
+  "image": "9207b8785b64.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "던전",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 10,
+  "gold_total": 50000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(4) King of Kings",
+  "file": "[4]King of Kings.rkm",
+  "image": "208696c9ed22.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "늪지",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 10,
+  "gold_total": 50000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(4) Land of Honor",
+  "file": "[4]Land of Honor.rkm",
+  "image": "f65093a951ad.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "유적",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 13,
+  "gold_total": 65000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(4) Oriental",
+  "file": "[4]Oriental.rkm",
+  "image": "378eb5bc1a2e.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "늪지",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 8,
+  "gold_total": 40000,
+  "wells": 6,
+  "official": true
+ },
+ {
+  "name": "(4) Trial",
+  "file": "[4]Trial.rkm",
+  "image": "8ae61596587f.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "늪지",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 10,
+  "gold_total": 50000,
+  "wells": 10,
+  "official": true
+ },
+ {
+  "name": "(6) Circle",
+  "file": "[6]Circle.rkm",
+  "image": "d70bf5cd9561.png",
+  "width": 256,
+  "height": 256,
+  "players": 6,
+  "tileset": "늪지",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 13,
+  "gold_total": 65000,
+  "wells": 7,
+  "official": true
+ },
+ {
+  "name": "(6) Death Insignia",
+  "file": "[6]Death Insignia.rkm",
+  "image": "c716f561dd2e.png",
+  "width": 324,
+  "height": 324,
+  "players": 6,
+  "tileset": "설원",
+  "size": [
+   162,
+   162
+  ],
+  "gold": 13,
+  "gold_total": 65000,
+  "wells": 12,
+  "official": true
+ },
+ {
+  "name": "(6) Nightmare",
+  "file": "[6]Nightmare.rkm",
+  "image": "4becfbbab3e4.png",
+  "width": 256,
+  "height": 384,
+  "players": 6,
+  "tileset": "던전",
+  "size": [
+   128,
+   192
+  ],
+  "gold": 12,
+  "gold_total": 60000,
+  "wells": 12,
+  "official": true
+ },
+ {
+  "name": "(6) Rival",
+  "file": "[6]Rival.rkm",
+  "image": "241bf6ac07b4.png",
+  "width": 324,
+  "height": 324,
+  "players": 6,
+  "tileset": "던전",
+  "size": [
+   162,
+   162
+  ],
+  "gold": 13,
+  "gold_total": 65000,
+  "wells": 13,
+  "official": true
+ },
+ {
+  "name": "(6) Tomb of Warrior",
+  "file": "[6]Tomb of Warrior.rkm",
+  "image": "616f0043a41e.png",
+  "width": 256,
+  "height": 256,
+  "players": 6,
+  "tileset": "유적",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 12,
+  "gold_total": 60000,
+  "wells": 12,
+  "official": true
+ },
+ {
+  "name": "(8) Apollo Dungeon",
+  "file": "[8]Apollo Dungeon.rkm",
+  "image": "c2d398d9f9db.png",
+  "width": 384,
+  "height": 384,
+  "players": 8,
+  "tileset": "던전",
+  "size": [
+   192,
+   192
+  ],
+  "gold": 20,
+  "gold_total": 100000,
+  "wells": 12,
+  "official": true
+ },
+ {
+  "name": "(8) For Hunter",
+  "file": "[8]For Hunter.rkm",
+  "image": "2910dd8b06bb.png",
+  "width": 384,
+  "height": 384,
+  "players": 8,
+  "tileset": "유적",
+  "size": [
+   192,
+   192
+  ],
+  "gold": 24,
+  "gold_total": 79027403228,
+  "wells": 16,
+  "official": true
+ },
+ {
+  "name": "(8) North and South",
+  "file": "[8]North and South.rkm",
+  "image": "facc259de9da.png",
+  "width": 324,
+  "height": 324,
+  "players": 8,
+  "tileset": "늪지",
+  "size": [
+   162,
+   162
+  ],
+  "gold": 24,
+  "gold_total": 120000,
+  "wells": 8,
+  "official": true
+ },
+ {
+  "name": "(8) Valley of Tombs",
+  "file": "[8]Valley of Tombs.rkm",
+  "image": "fdc684151802.png",
+  "width": 384,
+  "height": 384,
+  "players": 8,
+  "tileset": "유적",
+  "size": [
+   192,
+   192
+  ],
+  "gold": 24,
+  "gold_total": 120000,
+  "wells": 16,
+  "official": true
+ },
+ {
+  "name": "(8) X-ice",
+  "file": "[8]X-ice.rkm",
+  "image": "783f7319de16.png",
+  "width": 384,
+  "height": 384,
+  "players": 8,
+  "tileset": "설원",
+  "size": [
+   192,
+   192
+  ],
+  "gold": 12,
+  "gold_total": 60000,
+  "wells": 12,
+  "official": true
+ },
+ {
+  "name": "(4) (N4) Fighting Spirit",
+  "file": "Download/[4](N4) Fighting Spirit.rkm",
+  "image": "8e7b28664dde.png",
+  "width": 256,
+  "height": 256,
+  "players": 4,
+  "tileset": "설원",
+  "size": [
+   128,
+   128
+  ],
+  "gold": 16,
+  "gold_total": 70000,
+  "wells": 14,
+  "official": false
+ }
+]

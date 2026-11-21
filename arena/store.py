@@ -293,8 +293,22 @@ class Store:
 
     def maps(self, game: str) -> list:
         return [dict(r) for r in self.db.q(
-            "SELECT map_name, COUNT(*) n, AVG(duration) avg_dur, MAX(played_at) last FROM matches WHERE game=?"
-            " GROUP BY map_name ORDER BY n DESC, map_name", (game,))]
+            "SELECT map_name, COUNT(*) n, AVG(NULLIF(duration,0)) avg_dur, MAX(played_at) last,"
+            " SUM(gametype='rank') ranked FROM matches WHERE game=? GROUP BY map_name ORDER BY n DESC, map_name", (game,))]
+
+    def map_stats(self, game: str, map_name: str) -> dict:
+        """맵 하나의 통계: 경기 수·평균 시간, 종족별 출전/승률, 1:1 종족 상성, 많이 이긴 플레이어, 최근 경기."""
+        head = self.db.one(
+            "SELECT COUNT(*) n, AVG(NULLIF(duration,0)) avg_dur, MAX(duration) max_dur, MIN(NULLIF(duration,0)) min_dur,"
+            " MAX(played_at) last, SUM(gametype='rank') ranked FROM matches WHERE game=? AND map_name=?", (game, map_name))
+        st = self.race_stats(game, map_name)
+        top = [dict(r) for r in self.db.q(
+            "SELECT p.name, COUNT(*) n, SUM(p.result='win') w, SUM(p.result='lose') l FROM match_players p"
+            " JOIN matches m ON m.id=p.match_id WHERE m.game=? AND m.map_name=?"
+            " GROUP BY p.name ORDER BY w DESC, n DESC, p.name LIMIT 8", (game, map_name))]
+        recent = [self._with_players(m) for m in self.db.q(
+            "SELECT * FROM matches WHERE game=? AND map_name=? ORDER BY played_at DESC, id DESC LIMIT 5", (game, map_name))]
+        return {"head": dict(head), "per": st["per"], "vs": st["vs"], "top": top, "recent": recent}
 
     def today_count(self, game: str) -> int:
         return self.db.one("SELECT COUNT(*) n FROM matches WHERE game=? AND date(played_at)=date('now','localtime')",
@@ -330,16 +344,17 @@ class Store:
         return next((r for r in rows if r["name"] == name), None) or \
             next((r for r in rows if r["name"].lower() == name.lower()), None)
 
-    def race_stats(self, game: str) -> dict:
-        """종족별 승률 + 종족 상성표 (1:1 경기 기준)."""
+    def race_stats(self, game: str, map_name: str | None = None) -> dict:
+        """종족별 승률 + 종족 상성표 (1:1 경기 기준). map_name 을 주면 그 맵만."""
+        mf, ma = (" AND m.map_name=?", (map_name,)) if map_name is not None else ("", ())
         per = {r["race"]: dict(r) for r in self.db.q(
             "SELECT p.race, COUNT(*) n, SUM(p.result='win') w, SUM(p.result='lose') l FROM match_players p"
-            " JOIN matches m ON m.id=p.match_id WHERE m.game=? GROUP BY p.race", (game,))}
+            " JOIN matches m ON m.id=p.match_id WHERE m.game=?" + mf + " GROUP BY p.race", (game, *ma))}
         vs = {}
         for r in self.db.q(
                 "SELECT a.race ra, b.race rb, SUM(a.result='win') w, SUM(a.result='lose') l FROM match_players a"
                 " JOIN match_players b ON a.match_id=b.match_id AND a.slot!=b.slot JOIN matches m ON m.id=a.match_id"
-                " WHERE m.game=? AND (SELECT COUNT(*) FROM match_players c WHERE c.match_id=m.id)=2"
-                " GROUP BY a.race, b.race", (game,)):
+                " WHERE m.game=? AND (SELECT COUNT(*) FROM match_players c WHERE c.match_id=m.id)=2" + mf +
+                " GROUP BY a.race, b.race", (game, *ma)):
             vs[(r["ra"], r["rb"])] = (r["w"] or 0, r["l"] or 0)
         return {"per": per, "vs": vs}

@@ -133,8 +133,11 @@ def match_card(game_key: str, m: dict) -> str:
         f'<tr><td>{race_badge(game_key, p["race"])} {e(race_name(game_key, p["race"]))}</td><td>{plink(game_key, p["name"])}</td>'
         f'<td>{res_tag(p.get("result"))}</td><td class="dim">슬롯 {p["slot"] + 1}</td></tr>' for p in ps)
     played = m["played_at"][:16]
+    img = rakmu.map_image(m["map_name"]) if game_key == "rakmu" else ""
+    thumb = (f'<a class="mthumb" href="/{game_key}/maps#map={q(m["map_name"])}" title="맵 정보"><img src="{img}" alt="" loading="lazy"></a>'
+             if img else "")
     return f"""<div class="mcard"><div class="mbody">
-<div class="mmap"><a class="mapnm" href="/{game_key}/matches?map={q(m['map_name'])}">{e(m['map_name'])}</a>
+<div class="mmap">{thumb}<a class="mapnm" href="/{game_key}/matches?map={q(m['map_name'])}">{e(m['map_name'])}</a>
 <div class="mapdur">{dur}</div></div>
 <div class="mright">{vs}
 <div class="mfoot"><span class="fdt">{e(played)}</span><div class="fbtns">{tag}{dl}</div></div></div></div>
@@ -227,14 +230,144 @@ def page_stats(cfg, store, game, params) -> str:
     return layout(cfg, game, "stats", body, "게임통계")
 
 
+def _map_list(store, game) -> list[dict]:
+    """맵 카드 목록: 경기가 있는 맵(많은 순) 다음에 아직 경기가 없는 맵(맵 목록 순)."""
+    out, seen = [], set()
+    for m in store.maps(game.key):
+        out.append({**(rakmu.map_info(m["map_name"]) or {}), **m, "name": m["map_name"]})
+        seen.add(m["map_name"])
+    for c in rakmu.map_catalog():
+        if c["name"] not in seen:
+            out.append({**c, "n": 0, "avg_dur": None, "last": None, "ranked": 0})
+    return out
+
+
 def page_maps(cfg, store, game, params) -> str:
-    trs = "".join(
-        f'<tr><td><a class="plink" href="/{game.key}/matches?map={q(m["map_name"])}">{e(m["map_name"])}</a></td>'
-        f'<td class="num">{m["n"]}</td><td class="num">{fmt_dur(m["avg_dur"])}</td><td class="dim">{e((m["last"] or "")[:16])}</td></tr>'
-        for m in store.maps(game.key))
-    body = f"""<h1>맵통계</h1><div class="tblwrap"><table class="tbl"><thead><tr><th>맵</th><th>경기 수</th><th>평균 경기 시간</th><th>최근 경기</th></tr></thead>
-<tbody>{trs or '<tr><td colspan=4 class="empty">기록 없음</td></tr>'}</tbody></table></div>"""
+    maps = _map_list(store, game)
+    counts = sorted({m["players"] for m in maps if m.get("players")})
+    chips = '<button class="mxchip on" data-p="">전체</button>' + "".join(
+        f'<button class="mxchip" data-p="{n}">{n}인</button>' for n in counts)
+    cards = ""
+    for m in maps:
+        img = rakmu.map_image(m["name"])
+        thumb = (f'<img class="mxthumb" src="{img}" alt="" loading="lazy">' if img
+                 else '<div class="mxnoimg">미리보기 없음</div>')
+        badges = (f'<span class="mxpl">{m["players"]}인</span>' if m.get("players") else "") + \
+                 (f'<span class="mxrk">랭크 {m["ranked"]}</span>' if m.get("ranked") else "")
+        if m["n"]:
+            meta = f'<b>{m["n"]}</b>경기' + (f' · 평균 {fmt_dur(m["avg_dur"])}' if m.get("avg_dur") else "")
+        else:
+            meta = "0경기"
+        if m.get("tileset"):
+            meta += " · " + e(m["tileset"])
+        cards += (f'<div class="mxcard{"" if m["n"] else " mxempty"}" data-nm="{e(m["name"])}" '
+                  f'data-p="{m.get("players") or ""}" tabindex="0" role="button">'
+                  f'<div class="mxthumbwrap">{thumb}{badges}</div>'
+                  f'<div class="mxti"><div class="mxnm">{e(m["name"])}</div><div class="mxmeta">{meta}</div></div></div>')
+    body = f"""<h1>맵통계</h1>
+<p class="today">맵을 누르면 큰 미리보기와 그 맵의 종족 승률·상성, 많이 이긴 플레이어, 최근 경기를 볼 수 있습니다.
+미리보기의 네모는 시작 위치(플레이어 색)입니다.</p>
+<div class="mxchips">{chips}</div>
+<div class="mxgrid">{cards or '<div class="empty">맵 정보 없음</div>'}</div>
+<div id="mxmodal" class="mxmodal" hidden><button class="mxnav prev" title="이전 맵 (←)">‹</button>
+<div class="mxbox" role="dialog" aria-modal="true"><div class="mxhd"><span id="mxtitle"></span>
+<button class="mxx" title="닫기 (Esc)">✕</button></div><div class="mxbody" id="mxbody"></div></div>
+<button class="mxnav next" title="다음 맵 (→)">›</button></div>
+<script>{MAPS_JS.replace("__GAME__", game.key)}</script>"""
     return layout(cfg, game, "maps", body, "맵통계")
+
+
+MAPS_JS = r"""
+(function(){
+var modal=document.getElementById('mxmodal'),body=document.getElementById('mxbody'),title=document.getElementById('mxtitle'),cur=null;
+function cards(){return Array.prototype.filter.call(document.querySelectorAll('.mxcard'),function(c){return c.style.display!=='none';});}
+function open(c){cur=c;var nm=c.getAttribute('data-nm');title.textContent=nm;modal.hidden=false;document.body.classList.add('mxlock');
+ body.innerHTML='<div class="empty">불러오는 중…</div>';
+ history.replaceState(null,'','#map='+encodeURIComponent(nm));
+ fetch('/__GAME__/map/'+encodeURIComponent(nm)+'?frag=1').then(function(r){return r.text();})
+  .then(function(t){if(cur===c)body.innerHTML=t;}).catch(function(){body.innerHTML='<div class="empty">불러오기 실패</div>';});}
+function close(){modal.hidden=true;cur=null;document.body.classList.remove('mxlock');history.replaceState(null,'',location.pathname+location.search);}
+function nav(d){var l=cards(),i=l.indexOf(cur);if(i<0)return;open(l[(i+d+l.length)%l.length]);}
+var grid=document.querySelector('.mxgrid');
+grid.addEventListener('click',function(ev){var c=ev.target.closest('.mxcard');if(c)open(c);});
+grid.addEventListener('keydown',function(ev){var c=ev.target.closest('.mxcard');if(c&&(ev.key==='Enter'||ev.key===' ')){ev.preventDefault();open(c);}});
+modal.addEventListener('click',function(ev){if(ev.target===modal||ev.target.closest('.mxx'))close();else if(ev.target.closest('.mxnav.prev'))nav(-1);else if(ev.target.closest('.mxnav.next'))nav(1);});
+document.addEventListener('keydown',function(ev){if(modal.hidden)return;if(ev.key==='Escape')close();else if(ev.key==='ArrowLeft')nav(-1);else if(ev.key==='ArrowRight')nav(1);});
+document.querySelectorAll('.mxchip').forEach(function(b){b.addEventListener('click',function(){
+ document.querySelectorAll('.mxchip').forEach(function(x){x.classList.toggle('on',x===b);});var p=b.getAttribute('data-p');
+ document.querySelectorAll('.mxcard').forEach(function(c){c.style.display=(!p||c.getAttribute('data-p')===p)?'':'none';});});});
+var h=decodeURIComponent((location.hash.match(/^#map=(.+)$/)||[])[1]||'');
+if(h){var c=cards().filter(function(x){return x.getAttribute('data-nm')===h;})[0];if(c)open(c);}
+})();
+"""
+
+
+def map_detail(store, game, name: str) -> str:
+    """맵 하나의 미리보기 + 통계 (맵통계 창 안에 들어가는 조각, /<game>/map/<이름>?frag=1)."""
+    info = rakmu.map_info(name) or {}
+    st = store.map_stats(game.key, name)
+    h = st["head"]
+    img = rakmu.map_image(name)
+    pic = f'<img class="mdimg" src="{img}" alt="{e(name)} 미리보기">' if img else '<div class="mxnoimg big">미리보기 없음</div>'
+    facts = []
+    if info:
+        facts += [f'{info["players"]}인', e(info["tileset"]), f'{info["size"][0]} × {info["size"][1]}',
+                  f'금광 {info["gold"]}개' + (f' (매장량 {info["gold_total"]:,})' if info.get("gold_total") else ""),
+                  f'우물 {info["wells"]}개']
+        if not info.get("official"):
+            facts.append("추가 맵 (Maps/" + e(info["file"].split("/")[0]) + ")")
+    tiles = "".join(f'<div class="mdtile"><div class="mdk">{k}</div><div class="mdv">{v}</div></div>' for k, v in (
+        ("경기", h["n"] or 0), ("랭크게임", h["ranked"] or 0),
+        ("평균 시간", fmt_dur(h["avg_dur"]) if h["avg_dur"] else "-"),
+        ("최근 경기", e((h["last"] or "-")[:10]))))
+    if not h["n"]:
+        stats = '<div class="empty">이 맵에서 한 경기가 아직 없습니다.</div>'
+    else:
+        rows = ""
+        total = sum((st["per"].get(i) or {}).get("n", 0) for i in range(len(rakmu.RACES))) or 1
+        for i, rn in enumerate(rakmu.RACES):
+            p = st["per"].get(i) or {"n": 0, "w": 0, "l": 0}
+            w, l = p["w"] or 0, p["l"] or 0
+            pick = 100 * p["n"] / total
+            rate = f"{100 * w / (w + l):.0f}%" if w + l else "-"
+            rows += (f'<tr><td>{race_badge(game.key, i)} {e(rn)}</td><td class="num">{p["n"]}</td>'
+                     f'<td><div class="mdbar"><span style="width:{pick:.0f}%;background:{rakmu.RACE_COLORS[i]}"></span></div></td>'
+                     f'<td class="num">{w}-{l}</td><td class="num">{rate}</td></tr>')
+        unk = st["per"].get(None)
+        if unk:
+            rows += (f'<tr><td>{race_badge(game.key, None)} 모름</td><td class="num">{unk["n"]}</td>'
+                     f'<td class="dim" colspan=3>리플레이가 없어 종족을 모르는 경기</td></tr>')
+        head = "".join(f"<th>vs {race_badge(game.key, j)}</th>" for j in range(len(rakmu.RACES)))
+        grid = ""
+        for i in range(len(rakmu.RACES)):
+            cells = ""
+            for j in range(len(rakmu.RACES)):
+                w, l = st["vs"].get((i, j), (0, 0))
+                cells += f'<td class="num">{f"{100 * w / (w + l):.0f}% <span class=dim>({w}-{l})</span>" if w + l else "-"}</td>'
+            grid += f"<tr><th>{race_badge(game.key, i)} {e(rakmu.RACES[i])}</th>{cells}</tr>"
+        top = "".join(
+            f'<tr><td>{plink(game.key, t["name"])}</td><td class="num">{t["n"]}</td>'
+            f'<td class="num">{t["w"] or 0}-{t["l"] or 0}</td></tr>' for t in st["top"])
+        recent = ""
+        for m in st["recent"]:
+            ps = " <span class=dim>vs</span> ".join(
+                f'{race_badge(game.key, p["race"])} {plink(game.key, p["name"])} {res_tag(p.get("result"))}' for p in m["players"])
+            dur = f' <span class="dim">· {fmt_dur(m["duration"])}</span>' if m["duration"] else ""
+            recent += f'<li><span class="dim">{e(m["played_at"][:16])}</span> {ps}{dur}</li>'
+        stats = f"""<h3>종족별 출전·승률</h3><div class="tblwrap"><table class="tbl"><thead><tr><th>종족</th><th>출전</th><th>선택 비율</th><th>승-패</th><th>승률</th></tr></thead><tbody>{rows}</tbody></table></div>
+<h3>종족 상성 (1:1, 행 종족 기준 승률)</h3><div class="tblwrap"><table class="tbl"><thead><tr><th></th>{head}</tr></thead><tbody>{grid}</tbody></table></div>
+<div class="mdcols"><div><h3>이 맵에서 많이 이긴 플레이어</h3><div class="tblwrap"><table class="tbl"><thead><tr><th>플레이어</th><th>경기</th><th>승-패</th></tr></thead><tbody>{top}</tbody></table></div></div>
+<div><h3>최근 경기</h3><ul class="mdrecent">{recent}</ul>
+<a class="rbtn" href="/{game.key}/matches?map={q(name)}">이 맵 전적 모두 보기 →</a></div></div>"""
+    return f"""<div class="mdtop"><div class="mdpic">{pic}</div><div class="mdside">
+<div class="mdfacts">{" · ".join(facts) if facts else '<span class="dim">맵 파일 정보 없음</span>'}</div>
+<div class="mdtiles">{tiles}</div></div></div>{stats}"""
+
+
+def page_map(cfg, store, game, name: str) -> str:
+    body = (f'<p class="today"><a class="plink" href="/{game.key}/maps">← 맵통계</a></p><h1>{e(name)}</h1>'
+            f'<div class="mxbox static"><div class="mxbody">{map_detail(store, game, name)}</div></div>')
+    return layout(cfg, game, "maps", body, name)
 
 
 def page_not_ready(cfg, game) -> str:
@@ -297,8 +430,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 return self.json({"ok": False, "error": str(e)}, 503)
             return self.json({"ok": True, "sync": SYNC_STATUS})
-        if parts[0] == "static" and len(parts) == 2 and re.fullmatch(r"[\w.-]+", parts[1]):
-            f = STATIC / parts[1]
+        if parts[0] == "static" and 2 <= len(parts) <= 4 and all(re.fullmatch(r"[\w-][\w.-]*", x) for x in parts[1:]):
+            f = STATIC.joinpath(*parts[1:])
             if f.is_file():
                 ctype = {"css": "text/css", "js": "text/javascript", "png": "image/png", "svg": "image/svg+xml"}.get(
                     f.suffix[1:], "application/octet-stream")
@@ -334,6 +467,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.html(page_stats(self.cfg, self.store, game, params))
         if sub == "maps":
             return self.html(page_maps(self.cfg, self.store, game, params))
+        if sub == "map" and len(parts) == 3:
+            if params.get("frag"):
+                return self.html(map_detail(self.store, game, parts[2]))
+            return self.html(page_map(self.cfg, self.store, game, parts[2]))
         if sub == "player" and len(parts) == 3:
             return self.html(page_player(self.cfg, self.store, game, parts[2], params))
         return self.not_found()

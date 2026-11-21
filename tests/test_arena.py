@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -243,6 +244,22 @@ class HttpTests(unittest.TestCase):
                   "/rakmu/matches?player=bb&race=1&gametype=normal", "/api/rakmu/matches.json"):
             self.assertEqual(self.get(p)[0], 200, p)
         self.assertEqual(self.store.match_rows("rakmu")[1][0]["downloads"], 1)
+
+        # 맵통계: 미리보기 카드(경기 없는 맵 포함) + 맵별 통계 조각 + 그림 파일
+        from arena.games import rakmu as rk
+        html = self.get("/rakmu/maps")[1].decode()
+        self.assertIn('data-nm="(2) Distant"', html)
+        self.assertIn('data-nm="(8) X-ice"', html)               # 아직 경기가 없는 맵도 보인다
+        img = rk.map_image("(2) Distant")
+        self.assertTrue(img.startswith("/static/maps/rakmu/"))
+        code, data, headers = self.get(img)
+        self.assertEqual((code, headers["Content-Type"], data[:4]), (200, "image/png", b"\x89PNG"))
+        frag = self.get("/rakmu/map/" + urllib.parse.quote("(2) Distant") + "?frag=1")[1].decode()
+        self.assertIn("종족별 출전·승률", frag)
+        self.assertIn("용사", frag)
+        self.assertIn("금광", frag)
+        self.assertEqual(self.get("/rakmu/map/" + urllib.parse.quote("(8) X-ice"))[0], 200)
+        self.assertIn('class="mthumb"', self.get("/rakmu/matches")[1].decode())
 
     def test_404(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:

@@ -16,7 +16,7 @@ from test_arena import make_rkr  # noqa: E402
 out = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "data-demo")
 store = Store(Database(out / "arena.sqlite3"), out / "replays")
 names = ["용사", "바람검", "Frog", "aa", "마르두크장인", "아렌사랑"]
-maps = ["[2]Distant", "[2]The Final", "[4]Cross Road", "[4]녹아웃"]
+maps = ["[2]Distant", "[2]The Final", "[4]Four Power", "[8]X-ice", "[4]녹아웃"]   # 녹아웃 = 미리보기 없는 맵
 rng = random.Random(7)
 t0 = dt.datetime.now() - dt.timedelta(days=3)
 for i in range(30):
