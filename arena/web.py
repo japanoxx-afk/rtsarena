@@ -243,6 +243,7 @@ def page_not_ready(cfg, game) -> str:
 # ---------------------------------------------------------------- 요청 처리
 class Handler(BaseHTTPRequestHandler):
     server_version = "RtsArena/1.0"
+    timeout = 30          # 느리거나 멈춘 연결이 스레드를 계속 붙잡지 않게
     cfg: Config
     store: Store
 
@@ -289,6 +290,11 @@ class Handler(BaseHTTPRequestHandler):
         if not parts:
             return self.redirect(f"/{games.DEFAULT}/matches")
         if parts[0] == "healthz":
+            # DB 가 실제로 응답해야 healthy (멈추면 Portainer 에서 unhealthy 로 보인다)
+            try:
+                self.store.db.one("SELECT 1")
+            except Exception as e:  # noqa: BLE001
+                return self.json({"ok": False, "error": str(e)}, 503)
             return self.json({"ok": True})
         if parts[0] == "static" and len(parts) == 2 and re.fullmatch(r"[\w.-]+", parts[1]):
             f = STATIC / parts[1]

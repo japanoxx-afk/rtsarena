@@ -96,17 +96,32 @@ class Database:
             conn.close()
             raise
 
+    LOCK_WAIT = 30.0   # 초. 못 잡으면 요청은 500 으로 끝난다 (예전엔 영원히 기다려 스레드가 쌓였다)
+
+    def acquire(self):
+        if not self.lock.acquire(timeout=self.LOCK_WAIT):
+            raise sqlite3.OperationalError("DB 사용 대기 시간 초과")
+
     def q(self, sql: str, args=()) -> list:
-        with self.lock:
+        self.acquire()
+        try:
             return self.conn.execute(sql, args).fetchall()
+        finally:
+            self.lock.release()
 
     def one(self, sql: str, args=()):
-        with self.lock:
+        self.acquire()
+        try:
             return self.conn.execute(sql, args).fetchone()
+        finally:
+            self.lock.release()
 
     def run(self, sql: str, args=()) -> sqlite3.Cursor:
-        with self.lock:
+        self.acquire()
+        try:
             return self.conn.execute(sql, args)
+        finally:
+            self.lock.release()
 
     def tx(self):
         """with db.tx(): ... — 여러 문장을 한 번에 커밋."""
@@ -118,13 +133,41 @@ class _Tx:
         self.db = db
 
     def __enter__(self):
-        self.db.lock.acquire()
-        self.db.conn.execute("BEGIN IMMEDIATE")
-        return self.db.conn
+        self.db.acquire()
+        conn = self.db.conn
+        try:
+            if conn.in_transaction:
+                # 앞선 COMMIT/ROLLBACK 이 실패해 트랜잭션이 열린 채 남은 경우 — 되돌리고 새로 시작한다.
+                # (2026-11-21 NAS: 이 상태에서 'cannot start a transaction within a transaction' 이 반복됐음)
+                log.warning("열린 채 남은 트랜잭션을 되돌림")
+                conn.execute("ROLLBACK")
+            conn.execute("BEGIN IMMEDIATE")
+        except BaseException:
+            # __enter__ 가 실패하면 __exit__ 는 불리지 않는다 → 여기서 잠금을 풀어야 한다
+            self.db.lock.release()
+            raise
+        return conn
 
     def __exit__(self, exc_type, exc, tb):
+        conn = self.db.conn
         try:
-            self.db.conn.execute("ROLLBACK" if exc_type else "COMMIT")
+            if exc_type is None:
+                try:
+                    conn.execute("COMMIT")
+                except sqlite3.Error:
+                    log.exception("COMMIT 실패 — 되돌림")
+                    self._rollback(conn)
+                    raise
+            else:
+                self._rollback(conn)
         finally:
             self.db.lock.release()
         return False
+
+    @staticmethod
+    def _rollback(conn):
+        if conn.in_transaction:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                log.exception("ROLLBACK 실패")

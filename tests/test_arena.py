@@ -3,6 +3,8 @@ import gzip
 import io
 import json
 import os
+import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -247,6 +249,49 @@ class HttpTests(unittest.TestCase):
             self.get("/nope/x")
         self.assertEqual(cm.exception.code, 404)
 
+
+class DbRecoveryTests(unittest.TestCase):
+    """2026-11-21 NAS: 트랜잭션이 열린 채 남아 동기화가 매번 실패하고, 잠금이 안 풀려 요청 스레드가 쌓였다."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = Database(Path(self.tmp) / "a.sqlite3")
+
+    def tearDown(self):
+        self.db.conn.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_leftover_transaction_is_rolled_back(self):
+        self.db.conn.execute("BEGIN")          # 실패한 COMMIT 뒤처럼 열린 채 남김
+        with self.db.tx() as c:
+            c.execute("INSERT INTO matches(game,hash,map_path,map_name,played_at) VALUES('rakmu','h1','m','m','2026-01-01 00:00:00')")
+        self.assertEqual(self.db.one("SELECT COUNT(*) FROM matches")[0], 1)
+        self.assertFalse(self.db.conn.in_transaction)
+
+    def test_failed_begin_releases_lock(self):
+        import threading
+        class Boom:
+            in_transaction = False
+            def execute(self, sql, *a):
+                raise sqlite3.OperationalError("boom")
+        real = self.db.conn
+        self.db.conn = Boom()
+        with self.assertRaises(sqlite3.OperationalError):
+            with self.db.tx():
+                pass
+        self.db.conn = real
+        got = []
+        t = threading.Thread(target=lambda: got.append(self.db.lock.acquire(timeout=1)))
+        t.start(); t.join()
+        self.assertEqual(got, [True])          # 다른 스레드가 잠금을 잡을 수 있어야 한다
+
+    def test_error_in_body_rolls_back(self):
+        with self.assertRaises(ValueError):
+            with self.db.tx() as c:
+                c.execute("INSERT INTO matches(game,hash,map_path,map_name,played_at) VALUES('rakmu','h2','m','m','2026-01-01 00:00:00')")
+                raise ValueError
+        self.assertEqual(self.db.one("SELECT COUNT(*) FROM matches")[0], 0)
+        self.assertFalse(self.db.conn.in_transaction)
 
 if __name__ == "__main__":
     unittest.main()
