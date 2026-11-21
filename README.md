@@ -4,7 +4,7 @@ RTS 게임 전적·리플레이 사이트. 지금은 **라크무(RhakMu)** 만 �
 (임팩트 오브 파워는 "준비 중"으로 표시).
 
 - 참고한 사이트: http://jw2-arena.com/matches (리더보드 / 전적기록 / 게임통계 / 맵통계, 경기 카드 + 리플레이 다운로드)
-- **다음 작업자는 [HANDOFF.md](HANDOFF.md) 부터 읽는다.**
+- **다음 작업자는 [HANDOFF.md](HANDOFF.md) 부터 읽는다.** NAS 배포는 [deploy/NAS_DEPLOY.md](deploy/NAS_DEPLOY.md).
 
 ## 구성
 

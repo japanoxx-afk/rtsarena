@@ -67,7 +67,7 @@ tools/demo_seed.py               가짜 경기 30개
 - **알려진 문제**: 대전 리플레이에서 상대 이름이 빈 문자열. 사이트가 로비 서버 기록으로 채우고, 못 채우면 거절한다.
 - 원본 코드: new-rakum `replay_recorder.py`, `replay_memory.py`, `replay_model.py`.
 
-## 5. NAS 배포 순서 (아직 안 함)
+## 5. NAS 배포 순서 (아직 안 함) — 클릭 순서는 deploy/NAS_DEPLOY.md, 올릴 파일은 deploy/Prepare-NasUpload.ps1
 
 1. File Station: `game-servers/rtsarena/app/` 만들고 이 저장소의 `arena/` 폴더를 통째로 올린다
    (`__pycache__` 제외) → `game-servers/rtsarena/app/arena/__main__.py` 가 있어야 함. `game-servers/rtsarena/data/` 도 만든다.
