@@ -1,9 +1,13 @@
 """SQLite 저장소 (표준 라이브러리만 사용 — NAS 에서 pip 설치 없이 python:3.12-slim 으로 실행)."""
 from __future__ import annotations
 
+import logging
+import os
 import sqlite3
 import threading
 from pathlib import Path
+
+log = logging.getLogger("arena.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS matches (
@@ -57,8 +61,17 @@ class Database:
         self.conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        # NAS 공유 폴더(VM 에 네트워크로 연결된 볼륨)에서는 WAL(공유 메모리 파일)이 동작하지 않는 경우가 많아
+        # 기본은 일반 저널(DELETE). 로컬 디스크에서만 ARENA_SQLITE_WAL=1 로 WAL 을 켤 수 있다.
+        mode = "WAL" if os.environ.get("ARENA_SQLITE_WAL") == "1" else "DELETE"
+        try:
+            self.conn.execute(f"PRAGMA journal_mode={mode}")
+        except sqlite3.OperationalError as e:
+            log.warning("journal_mode=%s 실패(%s) — 기본값 사용", mode, e)
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
+        log.info("DB 준비: %s (journal_mode=%s)", path,
+                 self.conn.execute("PRAGMA journal_mode").fetchone()[0])
 
     def q(self, sql: str, args=()) -> list:
         with self.lock:
