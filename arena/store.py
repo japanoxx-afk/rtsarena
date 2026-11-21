@@ -132,6 +132,7 @@ class Store:
             dest = self.replay_dir / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
+            self._save_player_stats(c, mid, info, prefer=info.duration >= (m["duration"] or 0) if m else True)
             c.execute("INSERT INTO replays(match_id,sha256,filename,stored_path,size,duration,uploader)"
                       " VALUES(?,?,?,?,?,?,?)",
                       (mid, sha, fname, rel.as_posix(), len(data), info.duration, (uploader or "")[:32] or None))
@@ -170,6 +171,34 @@ class Store:
                 used.add(slot)
                 c.execute("INSERT INTO match_players(match_id,slot,name,race,result) VALUES(?,?,?,?,?)",
                           (mid, slot, p.name, p.race, results.get(p.index) if set_results else None))
+
+    @staticmethod
+    def _save_player_stats(c, mid, info, prefer=True):
+        """리플레이 지표를 같은 이름의 참가자에 넣는다. 같은 경기 리플레이가 여럿이면 가장 긴 것(prefer)을 쓴다."""
+        for p in info.players:
+            st = info.player_stats.get(p.index)
+            if not st or not p.name:
+                continue
+            cond = "" if prefer else " AND peak_army IS NULL"
+            c.execute("UPDATE match_players SET peak_army=?, units_made=?, buildings_made=?"
+                      " WHERE match_id=? AND name=? COLLATE NOCASE" + cond,
+                      (st["peak_army"], st["units_made"], st["buildings_made"], mid, p.name))
+
+    def backfill_player_stats(self) -> int:
+        """지표 열이 생기기 전에 올라온 리플레이를 다시 읽어 채운다 (시작할 때 한 번)."""
+        rows = self.db.q(
+            "SELECT r.match_id, r.stored_path FROM replays r WHERE EXISTS (SELECT 1 FROM match_players p"
+            " WHERE p.match_id=r.match_id AND p.peak_army IS NULL) ORDER BY r.match_id, r.duration DESC")
+        done = 0
+        for r in rows:
+            try:
+                info = rakmu.parse_replay((self.replay_dir / r["stored_path"]).read_bytes())
+            except (OSError, rakmu.ReplayError):
+                continue
+            with self.db.tx() as c:
+                self._save_player_stats(c, r["match_id"], info, prefer=False)
+            done += 1
+        return done
 
     # ------------------------------------------------------------------ 로비 서버와 동기화
     def import_rakmu_records(self) -> dict:
@@ -308,7 +337,22 @@ class Store:
             " GROUP BY p.name ORDER BY w DESC, n DESC, p.name LIMIT 8", (game, map_name))]
         recent = [self._with_players(m) for m in self.db.q(
             "SELECT * FROM matches WHERE game=? AND map_name=? ORDER BY played_at DESC, id DESC LIMIT 5", (game, map_name))]
-        return {"head": dict(head), "per": st["per"], "vs": st["vs"], "top": top, "recent": recent}
+        # 통계 지표(화면에서 종족·상대 종족으로 거른다): 참가자 1명 = 1줄. 상대 종족은 1:1 경기만.
+        entries = [dict(r) for r in self.db.q(
+            "SELECT p.race, p.result, m.duration dur, p.peak_army, p.units_made, p.buildings_made,"
+            " (SELECT o.race FROM match_players o WHERE o.match_id=m.id AND o.slot!=p.slot) opp,"
+            " (SELECT COUNT(*) FROM match_players c WHERE c.match_id=m.id) np"
+            " FROM match_players p JOIN matches m ON m.id=p.match_id WHERE m.game=? AND m.map_name=?"
+            " ORDER BY m.played_at DESC LIMIT 4000", (game, map_name))]
+        for x in entries:
+            if x.pop("np") != 2:
+                x["opp"] = None
+        mirror = {r["race"]: r["n"] for r in self.db.q(
+            "SELECT a.race, COUNT(*) n FROM match_players a JOIN match_players b ON a.match_id=b.match_id AND a.slot<b.slot"
+            " JOIN matches m ON m.id=a.match_id WHERE m.game=? AND m.map_name=? AND a.race=b.race"
+            " AND (SELECT COUNT(*) FROM match_players c WHERE c.match_id=m.id)=2 GROUP BY a.race", (game, map_name))}
+        return {"head": dict(head), "per": st["per"], "vs": st["vs"], "top": top, "recent": recent,
+                "entries": entries, "mirror": mirror}
 
     def today_count(self, game: str) -> int:
         return self.db.one("SELECT COUNT(*) n FROM matches WHERE game=? AND date(played_at)=date('now','localtime')",
@@ -348,8 +392,8 @@ class Store:
         """종족별 승률 + 종족 상성표 (1:1 경기 기준). map_name 을 주면 그 맵만."""
         mf, ma = (" AND m.map_name=?", (map_name,)) if map_name is not None else ("", ())
         per = {r["race"]: dict(r) for r in self.db.q(
-            "SELECT p.race, COUNT(*) n, SUM(p.result='win') w, SUM(p.result='lose') l FROM match_players p"
-            " JOIN matches m ON m.id=p.match_id WHERE m.game=?" + mf + " GROUP BY p.race", (game, *ma))}
+            "SELECT p.race, COUNT(*) n, SUM(p.result='win') w, SUM(p.result='lose') l, SUM(p.result='draw') d"
+            " FROM match_players p JOIN matches m ON m.id=p.match_id WHERE m.game=?" + mf + " GROUP BY p.race", (game, *ma))}
         vs = {}
         for r in self.db.q(
                 "SELECT a.race ra, b.race rb, SUM(a.result='win') w, SUM(a.result='lose') l FROM match_players a"

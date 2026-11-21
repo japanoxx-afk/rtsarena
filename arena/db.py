@@ -53,6 +53,10 @@ CREATE INDEX IF NOT EXISTS ix_replays_match ON replays(match_id);
 """
 
 
+# 리플레이에서 뽑은 플레이어 지표 (리플레이가 없는 경기는 NULL)
+PLAYER_STAT_COLUMNS = ("peak_army", "units_made", "buildings_made")
+
+
 class Database:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +94,10 @@ class Database:
             mode = "WAL" if os.environ.get("ARENA_SQLITE_WAL") == "1" and not nolock else "DELETE"
             conn.execute(f"PRAGMA journal_mode={mode}")
             conn.executescript(SCHEMA)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(match_players)")}
+            for col in PLAYER_STAT_COLUMNS:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE match_players ADD COLUMN {col} INTEGER")
             conn.execute("SELECT COUNT(*) FROM matches").fetchone()   # 실제로 읽히는지
             return conn
         except sqlite3.OperationalError:

@@ -28,6 +28,12 @@ def main():
     except Exception:
         logging.getLogger("arena").error("시작 실패:\n%s", traceback.format_exc())
         raise
+    try:
+        n = store.backfill_player_stats()
+        if n:
+            logging.getLogger("arena").info("예전 리플레이 %d개에서 플레이어 지표를 채움", n)
+    except Exception:  # noqa: BLE001 - 지표는 없어도 사이트는 돈다
+        logging.getLogger("arena").exception("플레이어 지표 채우기 실패")
     if store.rakmu.configured:
         start_sync_thread(cfg, store)
     logging.getLogger("arena").info("RTS ARENA on http://%s:%d (data=%s, rakmu=%s)", cfg.host, cfg.port, cfg.data_dir,

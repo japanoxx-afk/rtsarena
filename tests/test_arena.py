@@ -255,9 +255,16 @@ class HttpTests(unittest.TestCase):
         code, data, headers = self.get(img)
         self.assertEqual((code, headers["Content-Type"], data[:4]), (200, "image/png", b"\x89PNG"))
         frag = self.get("/rakmu/map/" + urllib.parse.quote("(2) Distant") + "?frag=1")[1].decode()
-        self.assertIn("종족별 출전·승률", frag)
+        self.assertIn("종족별 승률", frag)
+        self.assertIn("총 진행게임 수", frag)
+        self.assertIn("통계 지표", frag)
+        self.assertIn("\"peak_army\": ", frag)          # 리플레이에서 뽑은 지표
         self.assertIn("용사", frag)
         self.assertIn("금광", frag)
+        self.assertIsNotNone(self.store.db.one("SELECT peak_army FROM match_players WHERE name=?", ("용사",))[0])
+        self.store.db.run("UPDATE match_players SET peak_army=NULL, units_made=NULL, buildings_made=NULL")
+        self.assertEqual(self.store.backfill_player_stats(), 1)                  # 예전 리플레이 다시 읽기
+        self.assertIsNotNone(self.store.db.one("SELECT units_made FROM match_players WHERE name=?", ("용사",))[0])
         self.assertEqual(self.get("/rakmu/map/" + urllib.parse.quote("(8) X-ice"))[0], 200)
         self.assertIn('class="mthumb"', self.get("/rakmu/matches")[1].decode())
 

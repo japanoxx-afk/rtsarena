@@ -55,6 +55,9 @@ class ReplayInfo:
     human_slots: int = 0
     buildings_left: dict = field(default_factory=dict)  # 플레이어 번호 -> 마지막 장면의 건물 수
     units_left: dict = field(default_factory=dict)
+    # 플레이어 번호 -> {"peak_army": 동시에 가장 많았던 병력(건물 아닌 유닛) 수,
+    #                   "units_made": 한 번이라도 나온 유닛 수, "buildings_made": 한 번이라도 나온 건물 수}
+    player_stats: dict = field(default_factory=dict)
 
     @property
     def map_name(self) -> str:
@@ -174,6 +177,21 @@ def parse_replay(data: bytes) -> ReplayInfo:
     players.sort(key=lambda p: p.index)
 
     units: dict = {}
+    army: dict = {}                    # 소유자 -> 지금 병력 수
+    peak: dict = {}
+    made_units: dict = {}              # 소유자 -> 본 유닛 번호들
+    made_bld: dict = {}
+
+    def _add(r):
+        o, b = r[2], r[6] & F_BUILDING
+        (made_bld if b else made_units).setdefault(o, set()).add(r[0])
+        if not b:
+            army[o] = army.get(o, 0) + 1
+
+    def _remove(r):
+        if not (r[6] & F_BUILDING):
+            army[r[2]] = army.get(r[2], 0) - 1
+
     last_t = 0.0
     for n, line in enumerate(lines[1:]):
         if n > MAX_LINES:
@@ -189,11 +207,23 @@ def parse_replay(data: bytes) -> ReplayInfo:
             last_t = float(t)
         if "k" in fr:
             units = {r[0]: r for r in fr["k"] if isinstance(r, list) and len(r) >= 7}
+            army.clear()
+            for r in units.values():
+                _add(r)
         for r in fr.get("c", ()) or ():
             if isinstance(r, list) and len(r) >= 7:
+                old_r = units.get(r[0])
+                if old_r is not None:
+                    _remove(old_r)
                 units[r[0]] = r
+                _add(r)
         for x in fr.get("x", ()) or ():
-            units.pop(x, None)
+            old_r = units.pop(x, None)
+            if old_r is not None:
+                _remove(old_r)
+        for o, n in army.items():
+            if n > peak.get(o, 0):
+                peak[o] = n
 
     buildings, alive = {}, {}
     for r in units.values():
@@ -213,6 +243,9 @@ def parse_replay(data: bytes) -> ReplayInfo:
         human_slots=human_slots,
         buildings_left=buildings,
         units_left=alive,
+        player_stats={p.index: {"peak_army": peak.get(p.index, 0),
+                                "units_made": len(made_units.get(p.index, ())),
+                                "buildings_made": len(made_bld.get(p.index, ()))} for p in players},
     )
 
 
