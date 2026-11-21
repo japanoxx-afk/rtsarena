@@ -53,7 +53,9 @@ class ServerRecord:
 
     @property
     def ref(self) -> str:
-        return f"{self.raw.get('time', '')}|{','.join(self.players)}"
+        """같은 경기 키. 서버 0.9017 부터는 기록마다 id 가 있고, 그 전 기록은 시간|참가자."""
+        rid = self.raw.get("id")
+        return f"id:{rid}" if rid else f"{self.raw.get('time', '')}|{','.join(self.players)}"
 
 
 def parse_time(s: str):

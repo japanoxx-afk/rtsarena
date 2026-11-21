@@ -48,6 +48,7 @@ h1{font-size:22px;margin:18px 0 8px;}h2{font-size:17px;margin:22px 0 8px;color:v
 .rktag-rank{color:#ffd27a;border-color:#7a6430;}
 .rbtn{background:#2f3a66;border:1px solid #5a6aa8;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:700;}
 .rbtn:hover{background:#3b4a8a;}
+.rbtn-off,.rbtn-off:hover{background:transparent;border-color:var(--line);color:var(--faint);font-weight:500;cursor:default;}
 .dlbox{font-size:12px;color:var(--faint);min-width:22px;text-align:center;}
 .mdet{border-top:1px solid var(--line);}
 .mdet summary{cursor:pointer;padding:7px 14px;font-size:13px;color:var(--dim);}

@@ -136,11 +136,62 @@ class StoreTests(unittest.TestCase):
         r = st.ingest("rakmu", make_rkr([(0, "aa"), (1, "bb")], [32, 32, 0, 0, 0, 0, 0, 0], date=now.isoformat()), "e.rkr")
         self.assertIsNone(st.match("rakmu", r.match_hash)["result_source"])
         raw[0]["results"] = {"aa": {"code": 2}, "bb": {"code": 1}}
-        self.assertEqual(st.sync_rakmu_results(), 1)
+        s = st.import_rakmu_records()
+        self.assertEqual((s["created"], s["results"], s["mismatch"]), (0, 1, []))
         m = st.match("rakmu", r.match_hash)
         self.assertEqual({p["name"]: p["result"] for p in m["players"]}, {"aa": "lose", "bb": "win"})
         lb = st.leaderboard("rakmu")
         self.assertEqual([(x["name"], x["points"]) for x in lb], [("bb", 1010), ("aa", 990)])
+
+
+class RankingSyncTests(unittest.TestCase):
+    """사이트 리더보드 = 게임 안 랭킹 (라크무 서버 matches.json 기준)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_all_server_games_imported_and_ranking_equals_server(self):
+        raw = [
+            {"id": "m1", "time": "2026-11-20 20:00:00", "map": "[2]Distant", "players": ["Aa", "bb"],
+             "results": {"Aa": {"code": 1, "wl": "win"}, "bb": {"code": 2, "wl": "lose"}}},
+            {"time": "2026-11-20 21:00:00", "map": "[2]Distant", "players": ["Aa", "cc"],          # id 없는 옛 기록
+             "results": {"Aa": {"code": 0x82, "wl": "lose"}, "cc": {"code": 0x81, "wl": "win"}}},
+            {"id": "m3", "time": "2026-11-20 22:00:00", "map": "m", "players": ["bb", "cc"],
+             "results": {"bb": {"code": 3, "wl": "draw"}, "cc": {"code": 3, "wl": "draw"}}},
+            {"id": "m4", "time": "2026-11-20 23:00:00", "map": "m", "players": ["solo"], "results": {}},  # 혼자: 제외
+            {"id": "m5", "time": "2026-11-20 23:30:00", "map": "m", "players": ["bb", "cc"], "results": {}},  # 결과 없음
+        ]
+        st = new_store(self.tmp, raw)
+        s = st.import_rakmu_records()
+        self.assertEqual((s["created"], s["results"], s["mismatch"]), (4, 3, []))
+        self.assertEqual(st.import_rakmu_records()["created"], 0)                          # 두 번 가져와도 그대로
+        # 리플레이로만 추정한 경기는 랭킹에 안 들어간다
+        st.ingest("rakmu", make_rkr([(0, "dd"), (1, "ee")], [32, 32] + [0] * 6, date="2026-11-19T10:00:00",
+                                    final_buildings={0: 1, 1: 0}), "x.rkr")
+        lb = {r["name"]: (r["points"], r["w"], r["l"], r["d"]) for r in st.leaderboard("rakmu")}
+        self.assertEqual(lb, {"Aa": (1000, 1, 1, 0), "cc": (1010, 1, 0, 1), "bb": (990, 0, 1, 1)})
+        self.assertEqual(st.ranking_mismatch(st.rakmu.records()), [])
+        total, rows = st.match_rows("rakmu")
+        self.assertEqual(total, 5)                                                         # 서버 4 + 리플레이 1
+        self.assertTrue(all(not m["replays"] for m in rows if m["server_ref"]))
+        rank = st.match_rows("rakmu", player="cc")[1]
+        self.assertTrue(any(m["gametype"] == "rank" for m in rank))
+
+    def test_replay_uploaded_after_server_import_joins_same_match(self):
+        raw = [{"id": "g1", "time": "2026-11-21 20:00:03", "map": "[2]Distant", "players": ["aa", "bb"],
+                "results": {"aa": {"code": 1, "wl": "win"}, "bb": {"code": 2, "wl": "lose"}}}]
+        st = new_store(self.tmp, raw)
+        st.import_rakmu_records()
+        before = st.match_rows("rakmu")[1][0]
+        # 리플레이 쪽 추정(bb 승)은 서버 결과를 덮지 않는다
+        r = st.ingest("rakmu", make_rkr([(0, "bb"), (1, "aa")], [32, 32] + [0] * 6, races=[2, 1] + [3] * 6,
+                                        final_buildings={0: 3, 1: 0}, duration=420), "g1.rkr", "bb")
+        self.assertEqual((r.status, r.match_hash), ("merged", before["hash"]))
+        m = st.match("rakmu", r.match_hash)
+        self.assertEqual(st.match_rows("rakmu")[0], 1)
+        self.assertEqual({p["name"]: (p["race"], p["result"]) for p in m["players"]},
+                         {"aa": (1, "win"), "bb": (2, "lose")})
+        self.assertEqual((m["duration"], m["map_name"], len(m["replays"])), (420, "(2) Distant", 1))
 
 
 class HttpTests(unittest.TestCase):

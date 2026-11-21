@@ -95,7 +95,11 @@ class Store:
         if not fname.lower().endswith(rakmu.EXT):
             fname += rakmu.EXT
         with self.db.tx() as c:
-            m = self._find_same_match(c, game_key, info, played)
+            m = None
+            if rec:   # 로비 서버 기록으로 이미 만들어 둔 경기가 있으면 거기에 붙인다
+                m = c.execute("SELECT * FROM matches WHERE game=? AND server_ref=?", (game_key, rec.ref)).fetchone()
+            if m is None:
+                m = self._find_same_match(c, game_key, info, played)
             status = "merged" if m else "created"
             if m is None:
                 mhash = hashlib.sha256(f"{game_key}|{info.seed}|{info.map_path}|{played.isoformat()}|{sha}".encode()).hexdigest()
@@ -110,19 +114,20 @@ class Store:
                               (mid, p.index, p.name, p.race, results.get(p.index)))
             else:
                 mid, mhash = m["id"], m["hash"]
-                # 같은 경기의 다른 시점 리플레이: 비어 있던 정보만 채움
+                # 같은 경기의 다른 시점 리플레이 또는 로비 서버 기록으로 먼저 만든 경기: 비어 있던 정보만 채움
+                has_replay = c.execute("SELECT 1 FROM replays WHERE match_id=? LIMIT 1", (mid,)).fetchone()
+                if not has_replay:      # 서버 기록만 있던 경기: 맵·시드는 리플레이 쪽이 정확하다
+                    c.execute("UPDATE matches SET map_path=?, map_name=?, seed=COALESCE(seed, ?) WHERE id=?",
+                              (info.map_path, info.map_name, info.seed, mid))
                 if info.duration > (m["duration"] or 0):
                     c.execute("UPDATE matches SET duration=? WHERE id=?", (info.duration, mid))
-                if source == "server" or (source and not m["result_source"]):
+                # 승패: 서버 결과는 언제나 우선, 추정은 아무 결과도 없을 때만 (서버 결과를 추정으로 덮지 않음)
+                set_results = source == "server" or (source == "replay" and not m["result_source"])
+                if set_results:
                     c.execute("UPDATE matches SET result_source=?, gametype=? WHERE id=?", (source, gametype, mid))
-                    for p in info.players:
-                        c.execute("UPDATE match_players SET result=? WHERE match_id=? AND slot=?",
-                                  (results.get(p.index), mid, p.index))
                 if rec and not m["server_ref"]:
                     c.execute("UPDATE matches SET server_ref=? WHERE id=?", (rec.ref, mid))
-                for p in info.players:
-                    c.execute("INSERT OR IGNORE INTO match_players(match_id,slot,name,race,result) VALUES(?,?,?,?,?)",
-                              (mid, p.index, p.name, p.race, results.get(p.index)))
+                self._merge_players(c, mid, info.players, results, set_results)
             rel = Path(game_key) / played.strftime("%Y%m") / f"{sha[:16]}{rakmu.EXT}"
             dest = self.replay_dir / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -147,33 +152,96 @@ class Store:
                 return m
         return None
 
-    # ------------------------------------------------------------------ 결과 동기화
-    def sync_rakmu_results(self, days: int = 14) -> int:
-        """승패가 서버 기준이 아닌 최근 경기에 로비 서버 결과를 다시 붙인다. 바뀐 경기 수를 돌려준다."""
-        if not self.rakmu.configured:
-            return 0
-        self.rakmu.records(force=True)
-        since = (dt.datetime.now() - dt.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-        rows = self.db.q("SELECT * FROM matches WHERE game='rakmu' AND (result_source IS NULL OR result_source!='server')"
-                         " AND played_at>=?", (since,))
-        changed = 0
-        for m in rows:
-            players = self.db.q("SELECT * FROM match_players WHERE match_id=?", (m["id"],))
-            played = dt.datetime.strptime(m["played_at"], "%Y-%m-%d %H:%M:%S")
-            rec = self.rakmu.find(played, [p["name"] for p in players], len(players), self.window)
-            if not rec or not rec.results:
-                continue
-            by_name = {k.lower(): v for k, v in rec.results.items()}
-            if not any(by_name.get(p["name"].lower()) for p in players):
-                continue
-            with self.db.tx() as c:
-                c.execute("UPDATE matches SET result_source='server', gametype=?, server_ref=COALESCE(server_ref, ?)"
-                          " WHERE id=?", ("rank" if rec.ladder else "normal", rec.ref, m["id"]))
-                for p in players:
+    @staticmethod
+    def _merge_players(c, mid, players, results, set_results):
+        """리플레이 참가자를 경기에 합친다: 이름이 같으면 종족·결과만 채우고, 없으면 새로 넣는다."""
+        rows = {r["name"].lower(): r for r in c.execute("SELECT * FROM match_players WHERE match_id=?", (mid,))}
+        used = {r["slot"] for r in rows.values()}
+        for p in players:
+            r = rows.get(p.name.lower())
+            if r is not None:
+                c.execute("UPDATE match_players SET race=COALESCE(race, ?) WHERE match_id=? AND slot=?",
+                          (p.race, mid, r["slot"]))
+                if set_results:
                     c.execute("UPDATE match_players SET result=? WHERE match_id=? AND slot=?",
-                              (by_name.get(p["name"].lower()), m["id"], p["slot"]))
-            changed += 1
-        return changed
+                              (results.get(p.index), mid, r["slot"]))
+            else:
+                slot = p.index if p.index not in used else max(used) + 1
+                used.add(slot)
+                c.execute("INSERT INTO match_players(match_id,slot,name,race,result) VALUES(?,?,?,?,?)",
+                          (mid, slot, p.name, p.race, results.get(p.index) if set_results else None))
+
+    # ------------------------------------------------------------------ 로비 서버와 동기화
+    def import_rakmu_records(self) -> dict:
+        """로비 서버 matches.json 의 모든 대전을 경기로 가져온다 (리플레이가 없어도).
+
+        - 같은 경기 = server_ref(서버 기록 id, 옛 기록은 시간|참가자). 리플레이로 먼저 생긴 경기는 이름·시간으로 찾아 연결.
+        - 승패는 서버 결과로 덮어쓴다. 리더보드는 서버 결과만 쓰므로 게임 안 랭킹(server.py ranking_rows)과 같아진다.
+        """
+        stats = {"created": 0, "linked": 0, "results": 0, "mismatch": []}
+        if not self.rakmu.configured:
+            return stats
+        recs = self.rakmu.records(force=True)
+        with self.db.tx() as c:
+            for rec in recs:
+                names = list(dict.fromkeys(rec.players))
+                if len({n for n in names}) < 2 or rec.time is None:
+                    continue
+                m = c.execute("SELECT * FROM matches WHERE game='rakmu' AND server_ref=?", (rec.ref,)).fetchone()
+                if m is None:
+                    m = self._find_unlinked(c, rec, names)
+                    if m is not None:
+                        c.execute("UPDATE matches SET server_ref=? WHERE id=?", (rec.ref, m["id"]))
+                        stats["linked"] += 1
+                if m is None:
+                    mhash = hashlib.sha256(f"rakmu|server|{rec.ref}".encode()).hexdigest()
+                    cur = c.execute(
+                        "INSERT INTO matches(game,hash,map_path,map_name,played_at,duration,gametype,server_ref)"
+                        " VALUES('rakmu',?,?,?,?,0,?,?)",
+                        (mhash, rec.map, rakmu.map_display(rec.map), rec.time.strftime("%Y-%m-%d %H:%M:%S"),
+                         "rank" if rec.ladder else "normal", rec.ref))
+                    for i, n in enumerate(names):
+                        c.execute("INSERT INTO match_players(match_id,slot,name) VALUES(?,?,?)", (cur.lastrowid, i, n))
+                    m = c.execute("SELECT * FROM matches WHERE id=?", (cur.lastrowid,)).fetchone()
+                    stats["created"] += 1
+                if rec.results:
+                    rows = c.execute("SELECT slot, name, result FROM match_players WHERE match_id=?", (m["id"],)).fetchall()
+                    by_name = {k.lower(): v for k, v in rec.results.items()}
+                    want = {r["slot"]: by_name.get(r["name"].lower()) for r in rows}
+                    if m["result_source"] != "server" or any(r["result"] != want[r["slot"]] for r in rows):
+                        c.execute("UPDATE matches SET result_source='server', gametype=? WHERE id=?",
+                                  ("rank" if rec.ladder else "normal", m["id"]))
+                        for slot, wl in want.items():
+                            c.execute("UPDATE match_players SET result=? WHERE match_id=? AND slot=?", (wl, m["id"], slot))
+                        stats["results"] += 1
+        stats["mismatch"] = self.ranking_mismatch(recs)
+        return stats
+
+    def _find_unlinked(self, c, rec, names):
+        lo = (rec.time - dt.timedelta(minutes=self.window)).strftime("%Y-%m-%d %H:%M:%S")
+        hi = (rec.time + dt.timedelta(minutes=self.window)).strftime("%Y-%m-%d %H:%M:%S")
+        want = {n.lower() for n in names}
+        for m in c.execute("SELECT * FROM matches WHERE game='rakmu' AND server_ref IS NULL AND played_at BETWEEN ? AND ?"
+                           " ORDER BY played_at", (lo, hi)).fetchall():
+            have = {r[0].lower() for r in c.execute("SELECT name FROM match_players WHERE match_id=?", (m["id"],))}
+            if have == want:
+                return m
+        return None
+
+    def ranking_mismatch(self, recs) -> list:
+        """서버와 같은 방법(server.py compute_ranking)으로 센 승/패/무와 사이트 리더보드가 다른 계정 목록."""
+        tally = {}
+        for rec in recs:
+            if len(set(rec.players)) < 2:
+                continue
+            for acc, wl in rec.results.items():
+                if acc:
+                    t = tally.setdefault(acc, {"win": 0, "lose": 0, "draw": 0})
+                    t[wl] += 1
+        site = {r["name"]: {"win": r["w"], "lose": r["l"], "draw": r["d"]} for r in self.leaderboard("rakmu")}
+        return sorted(n for n in set(tally) | set(site) if tally.get(n) != site.get(n))
+
+    sync_rakmu_results = import_rakmu_records   # 예전 이름
 
     # ------------------------------------------------------------------ 조회
     def match_rows(self, game: str, player: str = "", race: str = "", map_name: str = "",
@@ -233,10 +301,13 @@ class Store:
                            (game,))["n"]
 
     def leaderboard(self, game: str) -> list:
+        """게임 안 랭킹과 같은 규칙: 로비 서버 결과가 있는 경기만, 계정 이름 그대로(대소문자 구분),
+        점수 = 1000 + 승×10 − 패×10. 리플레이로 추정한 승패는 넣지 않는다."""
         rows = self.db.q(
             "SELECT p.name, SUM(p.result='win') w, SUM(p.result='lose') l, SUM(p.result='draw') d, COUNT(*) games,"
             " MAX(m.played_at) last FROM match_players p JOIN matches m ON m.id=p.match_id"
-            " WHERE m.game=? GROUP BY p.name COLLATE NOCASE", (game,))
+            " WHERE m.game=? AND m.result_source='server' AND p.result IN ('win','lose','draw') AND p.name!=''"
+            " GROUP BY p.name", (game,))
         out = []
         for r in rows:
             d = dict(r)
@@ -245,20 +316,19 @@ class Store:
             decided = d["w"] + d["l"]
             d["rate"] = (100.0 * d["w"] / decided) if decided else None
             races = self.db.q("SELECT p.race, COUNT(*) n FROM match_players p JOIN matches m ON m.id=p.match_id"
-                              " WHERE m.game=? AND p.name=? COLLATE NOCASE GROUP BY p.race ORDER BY n DESC",
+                              " WHERE m.game=? AND p.name=? AND p.race IS NOT NULL GROUP BY p.race ORDER BY n DESC",
                               (game, d["name"]))
             d["main_race"] = races[0]["race"] if races else None
             out.append(d)
-        out.sort(key=lambda r: (-r["points"], -r["w"], r["l"], r["name"].lower()))
+        out.sort(key=lambda r: (-r["points"], -r["w"], r["l"], r["name"]))   # server.py ranking_rows 와 같은 순서
         for i, r in enumerate(out, 1):
             r["rank"] = i
         return out
 
     def player(self, game: str, name: str):
-        for r in self.leaderboard(game):
-            if r["name"].lower() == name.lower():
-                return r
-        return None
+        rows = self.leaderboard(game)
+        return next((r for r in rows if r["name"] == name), None) or \
+            next((r for r in rows if r["name"].lower() == name.lower()), None)
 
     def race_stats(self, game: str) -> dict:
         """종족별 승률 + 종족 상성표 (1:1 경기 기준)."""

@@ -116,7 +116,14 @@ def match_card(game_key: str, m: dict) -> str:
         vs = f'<div class="mvlist">{items}</div>'
     tag = '<span class="rktag rktag-rank">랭크게임</span>' if m["gametype"] == "rank" else \
         '<span class="rktag rktag-normal">일반게임</span>'
-    src = {"server": "로비 서버 결과", "replay": "리플레이 추정"}.get(m.get("result_source"), "결과 미확인")
+    src = {"server": "로비 서버 결과 (랭킹 반영)", "replay": "리플레이로 추정 (랭킹 미반영)"}.get(
+        m.get("result_source"), "결과 미확인 (랭킹 미반영)")
+    if m["replays"]:
+        dl = (f'<a class="rbtn" href="/download/{e(m["hash"])}" title="리플레이 다운로드">리플레이 ⬇</a>'
+              f'<span class="dlbox" title="다운로드 수">{m["downloads"]}</span>')
+    else:
+        dl = '<span class="rbtn rbtn-off" title="이 경기를 한 플레이어의 런처가 리플레이를 올리지 않았습니다">리플레이 없음</span>'
+    dur = fmt_dur(m["duration"]) if m["duration"] else "시간 정보 없음"
     reps = "".join(
         f'<li><a href="/download/{e(m["hash"])}?r={r["id"]}">{e(r["filename"])}</a> '
         f'<span class="dim">{r["size"] // 1024}KB · {fmt_dur(r["duration"])} · 올린 사람 {e(r["uploader"] or "-")}</span></li>'
@@ -127,11 +134,9 @@ def match_card(game_key: str, m: dict) -> str:
     played = m["played_at"][:16]
     return f"""<div class="mcard"><div class="mbody">
 <div class="mmap"><a class="mapnm" href="/{game_key}/matches?map={q(m['map_name'])}">{e(m['map_name'])}</a>
-<div class="mapdur">{fmt_dur(m['duration'])}</div></div>
+<div class="mapdur">{dur}</div></div>
 <div class="mright">{vs}
-<div class="mfoot"><span class="fdt">{e(played)}</span><div class="fbtns">{tag}
-<a class="rbtn" href="/download/{e(m['hash'])}" title="리플레이 다운로드">리플레이 ⬇</a>
-<span class="dlbox" title="다운로드 수">{m['downloads']}</span></div></div></div></div>
+<div class="mfoot"><span class="fdt">{e(played)}</span><div class="fbtns">{tag}{dl}</div></div></div></div>
 <details class="mdet"><summary>상세보기</summary><div class="detin">
 <table class="dtab"><tbody>{detail_players}</tbody></table>
 <div class="dim">승패: {e(src)} · 경기 ID {e(m['hash'][:12])}</div>
@@ -189,7 +194,7 @@ def page_player(cfg, store, game, name, params) -> str:
     total, rows = store.match_rows(game.key, player="", page=1, per_page=10_000)
     mine = [m for m in rows if any(p["name"].lower() == name.lower() for p in m["players"])][:50]
     if r is None:
-        head = f'<h1>{e(name)}</h1><div class="empty">이 플레이어의 기록이 없습니다.</div>'
+        head = f'<h1>{e(name)}</h1><div class="empty">랭킹에 들어간 경기(로비 서버 결과)가 아직 없습니다.</div>'
     else:
         rate = "-" if r["rate"] is None else f'{r["rate"]:.1f}%'
         head = (f'<h1>{race_badge(game.key, r["main_race"])} {e(r["name"])}</h1>'
@@ -329,19 +334,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlsplit(self.path)
         parts = [p for p in u.path.split("/") if p]
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            n = 0
+        if n <= 0 or n > rakmu.MAX_REPLAY_BYTES:
+            self.close_connection = True
+            return self.json({"ok": False, "status": "rejected", "message": "파일 크기가 올바르지 않습니다"}, 413)
+        # 본문을 먼저 다 읽는다: 읽지 않고 401 을 보내면 런처 쪽 전송이 끊겨(연결 재설정)
+        # '토큰 오류' 대신 '네트워크 오류'로 보인다 (테스트에서 확인).
+        data = self.rfile.read(n)
         if len(parts) != 3 or parts[0] != "api" or parts[2] != "replays":
             return self.json({"ok": False, "message": "not found"}, 404)
         if self.cfg.upload_token:
             got = self.headers.get("X-Arena-Token", "")
             if not hmac.compare_digest(got.encode(), self.cfg.upload_token.encode()):
                 return self.json({"ok": False, "status": "rejected", "message": "업로드 토큰이 맞지 않습니다"}, 401)
-        try:
-            n = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            n = 0
-        if n <= 0 or n > rakmu.MAX_REPLAY_BYTES:
-            return self.json({"ok": False, "status": "rejected", "message": "파일 크기가 올바르지 않습니다"}, 413)
-        data = self.rfile.read(n)
         fname = urllib.parse.unquote(self.headers.get("X-Filename", ""))
         uploader = urllib.parse.unquote(self.headers.get("X-Uploader", ""))
         try:
@@ -367,14 +375,21 @@ def make_server(cfg: Config) -> tuple[ThreadingHTTPServer, Store]:
 def start_sync_thread(cfg: Config, store: Store) -> threading.Thread:
     stop = threading.Event()
 
+    def sync_once():
+        try:
+            s = store.import_rakmu_records()
+            if s["created"] or s["linked"] or s["results"]:
+                log.info("로비 서버 동기화: 새 경기 %d, 리플레이 경기 연결 %d, 승패 반영 %d",
+                         s["created"], s["linked"], s["results"])
+            if s["mismatch"]:
+                log.warning("게임 안 랭킹과 다른 계정 %d명: %s", len(s["mismatch"]), ", ".join(s["mismatch"][:20]))
+        except Exception:  # noqa: BLE001
+            log.exception("로비 서버 동기화 실패")
+
     def loop():
+        sync_once()                       # 시작하자마자 한 번
         while not stop.wait(cfg.rakmu_sync_seconds):
-            try:
-                n = store.sync_rakmu_results()
-                if n:
-                    log.info("로비 서버 결과 반영: %d경기", n)
-            except Exception:  # noqa: BLE001
-                log.exception("결과 동기화 실패")
+            sync_once()
 
     t = threading.Thread(target=loop, name="rakmu-sync", daemon=True)
     t.stop = stop  # type: ignore[attr-defined]
