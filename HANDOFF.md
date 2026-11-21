@@ -25,6 +25,8 @@
 | new-rakum 런처에 연결 | **v0.9063, 브랜치 `launcher-v0.9063-arena-upload` 푸시함 (main 미병합)** — v0.9061(NAS 기본 서버) + main 의 v0.9062(벽 브러시) + 업로드. 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). CI 테스트 목록 93개 통과, 런처 15초 실행 확인. GitHub Secret ARENA_UPLOAD_TOKEN 등록됨(사용자) |
 | NAS 배포 (Portainer 스택) | **완료 2026-11-21** — http://akansas.synology.me:30013/ , 컨테이너 rtsarena-web healthy |
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
+| NAS 코드 업데이트 | **손으로** (File Station 덮어쓰기 + 재시작). 자동 배포는 계획만 — 5-1 |
+| 사이트 랭킹 = 게임 안 랭킹 | 2026-11-22 수정(98fe222): 다시보기 녹화 중복 제거 + 결과코드 판정. **NAS 반영 필요** |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
 
 ## 3. 구조
@@ -81,7 +83,32 @@ tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (�
 3. Environment variables: `ARENA_UPLOAD_TOKEN` = (긴 임의 문자열, 런처와 동일), 필요하면 `WEB_PORT`.
 4. Deploy → `http://<VM>:30013/healthz` 가 `{"ok": true}`.
 5. 외부 `http://112.159.73.235:30013` 확인 (공유기 30000~30999 → VM 전달이라고 new-rakum `nas-server/ports.txt` 에 기록됨).
-6. 업데이트: app/arena 파일 교체 → 컨테이너 재시작. DB 는 data/ 에 있어 유지된다 (스키마는 `CREATE IF NOT EXISTS`).
+6. 업데이트: app/arena 파일 교체 → 컨테이너 재시작. DB 는 data/ 에 있어 유지된다 (스키마는 `CREATE IF NOT EXISTS`,
+   나중에 더한 열은 db.py `ADDED_COLUMNS` 로 열 때 자동 추가). **현재는 코드가 바뀔 때마다 사용자가 손으로 한다** → 5-1 참고.
+
+### 5-1. 자동 배포 (계획, 사용자 승인 대기 — 2026-11-22 제안)
+
+문제: 사이트 코드를 고칠 때마다 사용자가 File Station 에 `deploy/upload/rtsarena/app/arena` 를 덮어쓰고
+Portainer 에서 `rtsarena-web` 을 재시작해야 한다 (수정이 잦아 매번 부탁하게 됨). 사용자 질문: "매번 이렇게 해야 해?"
+
+이미 자동인 것 (손 댈 필요 없음): 런처 리플레이 업로드, 1분마다 로비 서버 동기화(승패·랭킹), 다시보기 녹화 정리,
+플레이어 지표 채우기, DB 열 추가 — 모두 사이트가 시작할 때/동기화할 때 스스로 한다.
+
+제안한 방법 (rtsarena 저장소는 공개라 토큰 없이 받을 수 있음 — `https://codeload.github.com/japanoxx-afk/rtsarena/zip/refs/heads/<브랜치>` 200 확인):
+1. 작은 시작 파일(예: `deploy/bootstrap.py`, 표준 라이브러리만)을 NAS `rtsarena/app/` 에 한 번 올리고,
+   Portainer 스택 command 를 `python -u /mnt/game-servers/rtsarena/app/bootstrap.py` 로 한 번 바꾼다.
+2. bootstrap: 시작할 때 GitHub 에서 **`live` 브랜치** zip 을 받아 `app/arena` 를 교체(임시 폴더에 풀고 검사 후 바꿔치기) → `python -m arena` 실행.
+   받기 실패·압축 손상이면 기존 `app/arena` 로 그대로 켠다 (GitHub 장애에도 사이트는 켜짐).
+3. 10분마다 `live` 의 커밋이 바뀌었는지 확인 → 바뀌면 프로세스 종료 → `restart: unless-stopped` 로 재시작되며 새 코드 적용.
+   (api.github.com 비인증 한도 60회/시간 → 10분 간격이면 충분. 또는 zip ETag 비교)
+4. `main` 이 아니라 `live` 브랜치만 따라간다: 테스트(`python -m unittest tests.test_arena`)가 통과한 커밋만 `live` 로 올린다
+   → main 에 실수가 들어가도 실서버에 바로 나가지 않는다.
+5. 토큰·DB·리플레이는 지금처럼 NAS `data/` 와 Portainer 환경변수에만 있다. GitHub 에서 받는 것은 코드뿐.
+   compose 는 `read_only: true` 지만 app/ 는 볼륨이라 쓸 수 있다 (지금도 data/ 에 쓴다).
+6. 적용 뒤 확인: `/healthz` 에 배포된 커밋(예: `"version": "<sha>"`)을 보여 주면 반영 여부를 밖에서 알 수 있다.
+
+라크무 로비 서버(`rakmu-live/app`, new-rakum 저장소)도 같은 방식이 가능하지만, 게임 서버라 따로 신중히 진행할 것
+(경기 중 재시작되면 안 됨 → 방이 없을 때만 재시작하는 조건 필요).
 
 환경변수:
 
@@ -132,8 +159,11 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 5. ~~맵 미리보기·맵통계~~ (2026-11-21 완료). 새 맵이 생기면 게임이 설치된 PC 에서
    `python tools/render_map_previews.py --rakum <new-rakum 폴더>` → `arena/static/maps/rakmu/`, `arena/games/rakmu_maps.json` 커밋 후 NAS 에 올린다.
    목록에 없는 맵(다른 사람이 만든 맵)은 카드에 '미리보기 없음'으로 나온다.
-6. 임팩트 오브 파워: iop 저장소 `REPLAY_RESEARCH.md` 확인 후 `arena/games/iop.py` 추가.
-7. 공지사항·대회 페이지 (참고 사이트에 있음) — 필요하면.
+6. **NAS 자동 배포 (5-1)** — 사용자가 진행하라고 하면: `deploy/bootstrap.py` + compose command 변경 + `live` 브랜치 만들기
+   + `/healthz` 에 커밋 표시 + deploy/NAS_DEPLOY.md 에 한 번만 하는 전환 순서. 그 전까지는 코드 바꿀 때마다 사용자에게
+   `deploy/Prepare-NasUpload.ps1` 결과 폴더 덮어쓰기 + 재시작을 부탁한다.
+7. 임팩트 오브 파워: iop 저장소 `REPLAY_RESEARCH.md` 확인 후 `arena/games/iop.py` 추가.
+8. 공지사항·대회 페이지 (참고 사이트에 있음) — 필요하면.
 
 ## 9. 작업 기록
 
@@ -155,3 +185,4 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
   (2) matches.json 의 "wl" 은 예전 서버가 점수로 잘못 매긴 값일 수 있음 → 서버 랭킹처럼 결과코드로 다시 판정
       (rakmu_server.server_results = server.py _recompute_winloss 와 같은 규칙).
   실제 리플레이 115개 + 실제 matches.json 으로 재현: 경기 17개 → 7개, 리더보드 = 게임 안 랭킹 (완전 일치).
+- 2026-11-22: 사용자가 "매번 이렇게(File Station 덮어쓰기+재시작) 해야 해?" → GitHub `live` 브랜치를 따라가는 자동 배포를 제안, 5-1 에 기록 (승인 대기, 아직 구현 안 함).
