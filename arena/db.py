@@ -96,6 +96,16 @@ class Database:
             conn.close()
             raise
 
+    def reopen_nolock(self):
+        """파일 잠금 없이 다시 연다 (호출하는 쪽이 self.lock 을 잡고 있어야 한다)."""
+        log.warning("파일 잠금이 안 되는 저장소로 보임 → 잠금 없이 다시 엶 (프로세스 1개라 안전)")
+        try:
+            self.conn.close()
+        except sqlite3.Error:
+            pass
+        self.conn = self._open(self.path, True)
+        self.nolock = True
+
     LOCK_WAIT = 30.0   # 초. 못 잡으면 요청은 500 으로 끝난다 (예전엔 영원히 기다려 스레드가 쌓였다)
 
     def acquire(self):
@@ -154,9 +164,11 @@ class _Tx:
             if exc_type is None:
                 try:
                     conn.execute("COMMIT")
-                except sqlite3.Error:
+                except sqlite3.Error as e:
                     log.exception("COMMIT 실패 — 되돌림")
                     self._rollback(conn)
+                    if "locked" in str(e) and not self.db.nolock:
+                        self.db.reopen_nolock()      # NAS 공유 폴더에서 파일 잠금이 안 될 때. 다음 쓰기부터 성공한다
                     raise
             else:
                 self._rollback(conn)

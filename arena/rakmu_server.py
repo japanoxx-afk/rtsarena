@@ -74,6 +74,7 @@ class RakmuServerSource:
         self.url = url
         self.cache_seconds = cache_seconds
         self._cache = (0.0, [])
+        self.last_error = ""
 
     @property
     def configured(self) -> bool:
@@ -90,9 +91,13 @@ class RakmuServerSource:
             elif self.url:
                 with urllib.request.urlopen(self.url, timeout=5) as r:
                     raw = json.loads(r.read().decode("utf-8"))
+            elif self.file:
+                raise OSError(f"파일 없음: {self.file}")
         except (OSError, ValueError) as e:
             log.warning("라크무 서버 전적을 읽지 못함: %s", e)
+            self.last_error = str(e)
             return self._cache[1]
+        self.last_error = ""
         recs = [ServerRecord(r) for r in raw if isinstance(r, dict)]
         self._cache = (now, recs)
         return recs

@@ -293,5 +293,32 @@ class DbRecoveryTests(unittest.TestCase):
         self.assertEqual(self.db.one("SELECT COUNT(*) FROM matches")[0], 0)
         self.assertFalse(self.db.conn.in_transaction)
 
+    def test_commit_locked_reopens_without_locks(self):
+        real = self.db.conn
+        class Locked:
+            @property
+            def in_transaction(self):
+                return real.in_transaction
+            def execute(self, sql, *a):
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("database is locked")
+                return real.execute(sql, *a)
+            def close(self):
+                real.close()
+        self.db.conn = Locked()
+        with self.assertRaises(sqlite3.OperationalError):
+            with self.db.tx():
+                pass
+        self.assertTrue(self.db.nolock)
+        with self.db.tx() as c:
+            c.execute("INSERT INTO matches(game,hash,map_path,map_name,played_at) VALUES('rakmu','h3','m','m','2026-01-01 00:00:00')")
+        self.assertEqual(self.db.one("SELECT COUNT(*) FROM matches")[0], 1)
+
+    def test_missing_matches_file_is_reported(self):
+        from arena.rakmu_server import RakmuServerSource
+        src = RakmuServerSource(Path(self.tmp) / "nope.json", None)
+        self.assertEqual(src.records(force=True), [])
+        self.assertIn("nope.json", src.last_error)
+
 if __name__ == "__main__":
     unittest.main()

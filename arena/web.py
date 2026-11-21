@@ -20,6 +20,7 @@ from .rakmu_server import RakmuServerSource
 from .store import Store
 
 log = logging.getLogger("arena.web")
+SYNC_STATUS: dict = {"enabled": False}   # /healthz 에 보여 줌 (NAS 로그를 못 볼 때 원인 확인용)
 STATIC = Path(__file__).resolve().parent / "static"
 PER_PAGE = 20
 
@@ -295,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.store.db.one("SELECT 1")
             except Exception as e:  # noqa: BLE001
                 return self.json({"ok": False, "error": str(e)}, 503)
-            return self.json({"ok": True})
+            return self.json({"ok": True, "sync": SYNC_STATUS})
         if parts[0] == "static" and len(parts) == 2 and re.fullmatch(r"[\w.-]+", parts[1]):
             f = STATIC / parts[1]
             if f.is_file():
@@ -381,15 +382,23 @@ def make_server(cfg: Config) -> tuple[ThreadingHTTPServer, Store]:
 def start_sync_thread(cfg: Config, store: Store) -> threading.Thread:
     stop = threading.Event()
 
+    SYNC_STATUS.update(enabled=True, source=str(store.rakmu.file or store.rakmu.url))
+
     def sync_once():
+        import datetime as _dt
+        SYNC_STATUS["last_run"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             s = store.import_rakmu_records()
+            SYNC_STATUS.update(error=store.rakmu.last_error, server_records=len(store.rakmu.records()),
+                               created=s["created"], linked=s["linked"], results=s["results"],
+                               mismatch=len(s["mismatch"]))
             if s["created"] or s["linked"] or s["results"]:
                 log.info("로비 서버 동기화: 새 경기 %d, 리플레이 경기 연결 %d, 승패 반영 %d",
                          s["created"], s["linked"], s["results"])
             if s["mismatch"]:
                 log.warning("게임 안 랭킹과 다른 계정 %d명: %s", len(s["mismatch"]), ", ".join(s["mismatch"][:20]))
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            SYNC_STATUS["error"] = f"{type(e).__name__}: {e}"
             log.exception("로비 서버 동기화 실패")
 
     def loop():

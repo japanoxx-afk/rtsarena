@@ -24,6 +24,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       ARENA_DATA_DIR: /mnt/game-servers/rtsarena/data
       ARENA_PORT: "8080"
+      ARENA_SQLITE_NOLOCK: "1"        # NAS 공유 폴더는 파일 잠금이 불안정 (COMMIT 'database is locked'). 프로세스 1개라 안전
       ARENA_UPLOAD_TOKEN: ${ARENA_UPLOAD_TOKEN}
       # 라크무 로비 서버 전적(승패) — 같은 볼륨의 파일을 읽기만 한다
       RAKMU_MATCHES_FILE: /mnt/game-servers/rakmu-live/data/matches.json
