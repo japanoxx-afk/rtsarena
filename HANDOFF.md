@@ -40,7 +40,7 @@ arena/
   rakmu_server.py  라크무 로비 서버 matches.json 읽기 (파일 또는 URL)
   web.py           HTTP 라우팅 + HTML 생성 (템플릿 엔진 없음, 서버에서 바로 만듦)
   games/__init__.py  게임 목록(드롭박스). 새 게임 = 모듈 추가 + ready=True
-  games/rakmu.py   .rkr 해석: 맵 이름, 종족(무휼/아렌/마르두크), 사람/컴퓨터, 경기 시간, 승패 추정
+  games/rakmu.py   .rkr 해석: 맵 이름, 종족(위국군/아스트리아/바르바로이), 사람/컴퓨터, 경기 시간, 승패 추정
   static/app.css
 launcher/rakmu/arena_upload.py   라크무 런처용 (new-rakum 으로 복사해서 씀)
 deploy/compose.yaml              NAS Portainer 스택
@@ -71,7 +71,9 @@ tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (�
 - gzip JSON 줄. 1줄 머리: `date`(시작 시각, 플레이어 PC 시간), `map`(`DATA\MAPS\[2]Distant.rkm`), `players`[{index,name,race}],
   `races`[8], `slots`[8], `seed`. 나머지 줄: 장면 `t`(초), `k`/`c`/`x` 유닛.
 - `slots`: **0x20=사람, 0x10=컴퓨터, 0=빈 자리** (싱글 3개 [32,16], 대전 1개 [32,32] 로 확인).
-- 종족 번호: 0 무휼, 1 아렌, 2 마르두크, 3 = 빈 자리/기타.
+- 종족 번호: 0 무휼, 1 아렌, 2 마르두크, 3 = 빈 자리/기타. **화면 이름(2026-11-23 사용자 지정)**: 위국군 / 아스트리아 / 바르바로이
+  (`arena/games/rakmu.py` `RACES`·`RACE_LETTERS`). DB `match_players.race` 는 번호라 기존 기록은 고칠 것이 없고, 코드만 바꾸면 모든 화면이 바뀐다.
+  게임 방 화면·런처도 new-rakum v0.9092 에서 같은 이름으로 바꿈.
 - **알려진 문제**: 대전 리플레이에서 상대 이름이 빈 문자열. 사이트가 로비 서버 기록으로 채우고, 못 채우면 거절한다.
 - 원본 코드: new-rakum `replay_recorder.py`, `replay_memory.py`, `replay_model.py`.
 
