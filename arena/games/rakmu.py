@@ -22,9 +22,9 @@ KEY = "rakmu"
 TITLE = "라크무"
 EXT = ".rkr"
 
-RACES = ("무휼", "아렌", "마르두크")
+RACES = ("위국군", "아스트리아", "바르바로이")   # 종족 번호 0 무휼(Mu hŭl), 1 아렌(Aren), 2 마르두크(Marduke)
 RACE_COLORS = ("#e8944a", "#4a90e2", "#b46ae0")
-RACE_LETTERS = ("무", "아", "마")
+RACE_LETTERS = ("위", "아", "바")
 SLOT_HUMAN, SLOT_COMPUTER = 0x20, 0x10
 F_BUILDING = 1
 
