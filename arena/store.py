@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import games
 from .db import Database
-from .games import rakmu
+from .games import rakmu, samchun
 from .rakmu_server import RakmuServerSource
 
 POINTS_BASE, POINTS_WIN, POINTS_LOSE = 1000, 10, 10   # 라크무 서버 게임 내 랭킹과 같은 규칙
@@ -64,6 +64,8 @@ class Store:
         game = games.get(game_key)
         if not game or not game.ready:
             return UploadResult(False, "rejected", f"지원하지 않는 게임: {game_key}")
+        if game_key == "samchun":
+            return self._ingest_samchun(data, filename, uploader)
         if game_key != "rakmu":
             return UploadResult(False, "rejected", "아직 해석기가 없는 게임입니다")
         sha = hashlib.sha256(data).hexdigest()
@@ -158,6 +160,89 @@ class Store:
                        info.seed, played.strftime("%Y-%m-%d %H:%M:%S")))
         msg = "새 경기로 저장했습니다" if status == "created" else "같은 경기에 리플레이를 추가했습니다"
         return UploadResult(True, status, msg, mhash)
+
+    def _ingest_samchun(self, data: bytes, filename: str, uploader: str) -> UploadResult:
+        """삼국지천명2 .screplay: 호환 서버 경기(server_ref)나 같은 사람·시간의 경기에 붙이고, 없으면 새 경기.
+
+        승패는 호환 서버 결과만 쓴다 (리플레이에는 승패가 없다). 같은 경기를 두 사람이 올리면 리플레이 2개로 보관.
+        """
+        game_key = "samchun"
+        sha = hashlib.sha256(data).hexdigest()
+        row = self.db.one("SELECT m.hash FROM replays r JOIN matches m ON m.id=r.match_id WHERE r.sha256=?", (sha,))
+        if row:
+            return UploadResult(True, "duplicate", "이미 올라간 리플레이입니다", row["hash"])
+        try:
+            info = samchun.parse_replay(data, filename)
+        except samchun.ReplayError as e:
+            return UploadResult(False, "rejected", str(e))
+        if not samchun.is_multiplayer(info):
+            return UploadResult(False, "rejected", "상대 플레이어가 없는 경기(싱글·나 + 컴퓨터)는 저장하지 않습니다")
+        names = [p.name for p in info.players]
+        src = self.source(game_key)
+        rec = src.find(info.start, names, len(names), self.window) if src else None
+        results, source = {}, None
+        if rec and rec.results:
+            by_name = {k.lower(): v for k, v in rec.results.items()}
+            results = {p.index: by_name.get(p.name.lower()) for p in info.players}
+            source = "server"
+        played = info.start.strftime("%Y-%m-%d %H:%M:%S")
+        fname = _safe_filename(filename or f"{info.end:%Y-%m-%d_%H-%M-%S}_auto{samchun.EXT}")
+        if not fname.lower().endswith(samchun.EXT):
+            fname += samchun.EXT
+        with self.db.tx() as c:
+            m = None
+            if rec:
+                m = c.execute("SELECT * FROM matches WHERE game=? AND server_ref=?", (game_key, rec.ref)).fetchone()
+            if m is None:
+                m = self._find_same_players(c, game_key, names, info.start)
+            status = "merged" if m else "created"
+            if m is None:
+                mhash = hashlib.sha256(f"{game_key}|replay|{played}|{sha}".encode()).hexdigest()
+                cur = c.execute(
+                    "INSERT INTO matches(game,hash,map_path,map_name,played_at,duration,gametype,result_source,server_ref,room)"
+                    " VALUES(?,?,?,?,?,?,'normal',?,?,?)",
+                    (game_key, mhash, info.map_path, info.map_name, played, info.duration, source,
+                     rec.ref if rec else None, (str(rec.raw.get("room") or "")[:64] or None) if rec else None))
+                mid = cur.lastrowid
+                for p in info.players:
+                    c.execute("INSERT INTO match_players(match_id,slot,name,race,result) VALUES(?,?,?,NULL,?)",
+                              (mid, p.index, p.name, results.get(p.index)))
+            else:
+                mid, mhash = m["id"], m["hash"]
+                if info.map_path and (not m["map_path"] or m["map_name"] == samchun.UNKNOWN_MAP):
+                    c.execute("UPDATE matches SET map_path=?, map_name=? WHERE id=?", (info.map_path, info.map_name, mid))
+                if info.duration > (m["duration"] or 0):
+                    c.execute("UPDATE matches SET duration=? WHERE id=?", (info.duration, mid))
+                if rec and not m["server_ref"]:
+                    c.execute("UPDATE matches SET server_ref=? WHERE id=?", (rec.ref, mid))
+                set_results = source == "server"
+                if set_results:
+                    c.execute("UPDATE matches SET result_source='server' WHERE id=?", (mid,))
+                self._merge_players(c, mid, info.players, results, set_results)
+            rel = Path(game_key) / info.start.strftime("%Y%m") / f"{sha[:16]}{samchun.EXT}"
+            dest = self.replay_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            c.execute("INSERT INTO replays(match_id,sha256,filename,stored_path,size,duration,uploader,seed,rec_date)"
+                      " VALUES(?,?,?,?,?,?,?,NULL,?)",
+                      (mid, sha, fname, rel.as_posix(), len(data), info.duration, (uploader or "")[:32] or None, played))
+        msg = "새 경기로 저장했습니다" if status == "created" else "같은 경기에 리플레이를 추가했습니다"
+        return UploadResult(True, status, msg, mhash)
+
+    def _find_same_players(self, c, game_key, names, when):
+        """시간 창 안에서 참가자 이름이 같은 경기 (가장 가까운 것). 맵·시드가 없는 게임용."""
+        lo = (when - dt.timedelta(minutes=self.window)).strftime("%Y-%m-%d %H:%M:%S")
+        hi = (when + dt.timedelta(minutes=self.window)).strftime("%Y-%m-%d %H:%M:%S")
+        want = {n.lower() for n in names}
+        best, gap = None, None
+        for m in c.execute("SELECT * FROM matches WHERE game=? AND played_at BETWEEN ? AND ?", (game_key, lo, hi)).fetchall():
+            have = {r[0].lower() for r in c.execute("SELECT name FROM match_players WHERE match_id=?", (m["id"],))}
+            if have != want:
+                continue
+            g = abs((dt.datetime.strptime(m["played_at"], "%Y-%m-%d %H:%M:%S") - when).total_seconds())
+            if gap is None or g < gap:
+                best, gap = m, g
+        return best
 
     def _original_of_playback(self, game_key, info, played):
         """이미 받은 경기를 다시보기하며 녹화한 파일이면 원래 경기를 돌려준다.
@@ -294,7 +379,8 @@ class Store:
     def backfill_player_stats(self) -> int:
         """지표 열이 생기기 전에 올라온 리플레이를 다시 읽어 채운다 (시작할 때 한 번)."""
         rows = self.db.q(
-            "SELECT r.match_id, r.stored_path FROM replays r WHERE EXISTS (SELECT 1 FROM match_players p"
+            "SELECT r.match_id, r.stored_path FROM replays r JOIN matches m ON m.id=r.match_id AND m.game='rakmu'"
+            " WHERE EXISTS (SELECT 1 FROM match_players p"
             " WHERE p.match_id=r.match_id AND p.peak_army IS NULL) ORDER BY r.match_id, r.duration DESC")
         done = 0
         for r in rows:

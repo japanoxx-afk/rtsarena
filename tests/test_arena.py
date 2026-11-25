@@ -242,6 +242,27 @@ class RankingSyncTests(unittest.TestCase):
         self.assertEqual(st2.cleanup_playbacks(), 0)
 
 
+def make_screplay(names, multiplayer=True, end="2026-11-25_20-25-00", ticks=30 * 600, mapname="MAP\\Duel.map",
+                  diagnostic=False):
+    """samchun tools/replay_archive.py create() 와 같은 모양의 .screplay (내용물은 가짜)."""
+    import hashlib
+    import zipfile
+    save, journal = b"\x53\x02\x00\x00\x53\x02\x00\x00" + b"s" * 64, b"journal" * 50
+    meta = {"format": 3, "kind": "samchun-replay", "auto_saved": True, "multiplayer": multiplayer,
+            "participants": [{"slot": i, "id": n} for i, n in enumerate(names)], "slot_ids": list(range(len(names))),
+            "first_tick": 2, "last_tick": 2 + ticks, "tick_rate": 30, "command_count": 10,
+            "completion": "diagnostic" if diagnostic else "completed", "diagnostic_only": diagnostic,
+            "checkpoint_sha256": hashlib.sha256(save).hexdigest(), "journal_sha256": hashlib.sha256(journal).hexdigest(),
+            "maps": [{"path": mapname, "member": "maps/0.map", "sha256": "", "size": 4}]}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False))
+        z.writestr("checkpoint.sav", save)
+        z.writestr("record.journal", journal)
+        z.writestr("maps/0.map", b"map!")
+    return buf.getvalue(), f"{end}_auto.screplay"
+
+
 # 삼국지천명2 호환 서버(samchun server/compat_server.py 1.3.58) data/matches.json 과 같은 모양
 SAMCHUN_RAW = [
     {"id": "a1", "time": "2026-11-25 20:00:00", "room": "한판", "map": "Duel", "players": ["Alpha", "Bravo"],
@@ -285,6 +306,41 @@ class SamchunTests(unittest.TestCase):
         self.assertEqual(st.basic_stats("samchun")["head"]["draws"], 1)
         db.conn.close()
 
+    def test_replay_upload_links_to_server_match(self):
+        db = Database(Path(self.tmp) / "a.sqlite3")
+        st = Store(db, Path(self.tmp) / "replays", None, 15, {"samchun": FakeSource(SAMCHUN_RAW)})
+        st.import_server_records("samchun")
+        # 20:00 에 시작해 10분 한 Alpha vs Bravo (서버 기록 a1) — 두 사람이 각자 올린다
+        a = make_screplay(["Alpha", "Bravo"], end="2026-11-25_20-10-30")
+        b = make_screplay(["Bravo", "Alpha"], end="2026-11-25_20-10-31")
+        r1, r2 = st.ingest("samchun", *a), st.ingest("samchun", *b)
+        self.assertEqual((r1.status, r2.status), ("merged", "merged"))
+        self.assertEqual(r1.match_hash, r2.match_hash)
+        self.assertEqual(st.ingest("samchun", *a).status, "duplicate")
+        m = st.match("samchun", r1.match_hash)
+        self.assertEqual(m["server_ref"], "id:a1")
+        self.assertEqual(len(m["replays"]), 2)
+        self.assertEqual({p["name"]: p["result"] for p in m["players"]}, {"Alpha": "win", "Bravo": "lose"})
+        self.assertEqual(m["map_name"], "Duel")
+        self.assertEqual(int(m["duration"]), 600)
+        # 싱글·진단·손상 파일은 거절
+        self.assertEqual(st.ingest("samchun", *make_screplay(["Alpha"], multiplayer=False)).status, "rejected")
+        self.assertEqual(st.ingest("samchun", *make_screplay(["Alpha", "Bravo"], diagnostic=True)).status, "rejected")
+        self.assertEqual(st.ingest("samchun", b"PK\x03\x04junk", "x.screplay").status, "rejected")
+        # 서버 기록이 아직 없는 경기 → 리플레이로 먼저 생기고, 나중 서버 기록이 같은 경기에 붙는다
+        late = make_screplay(["Echo", "Fox"], end="2026-11-26_01-10-00")
+        r3 = st.ingest("samchun", *late)
+        self.assertEqual(r3.status, "created")
+        st.sources["samchun"].raw = SAMCHUN_RAW + [
+            {"id": "z9", "time": "2026-11-26 01:00:05", "room": "", "map": "", "players": ["Fox", "Echo"],
+             "results": {"Fox": {"code": 1}, "Echo": {"code": 2}}}]
+        s = st.import_server_records("samchun")
+        self.assertEqual((s["created"], s["linked"]), (0, 1))
+        m = st.match("samchun", r3.match_hash)
+        self.assertEqual({p["name"]: p["result"] for p in m["players"]}, {"Echo": "lose", "Fox": "win"})
+        self.assertEqual([r["name"] for r in st.leaderboard("samchun")][-1], "Echo")
+        db.conn.close()
+
     def test_pages(self):
         path = Path(self.tmp) / "matches.json"
         path.write_text(json.dumps(SAMCHUN_RAW, ensure_ascii=False), encoding="utf-8")
@@ -310,7 +366,7 @@ class SamchunTests(unittest.TestCase):
             self.assertIn("1020", html)
             self.assertIn('href="/samchun/matches"', html)                 # 메뉴가 삼국지천명2 주소로 바뀜
             code, html = get("/samchun/matches")
-            self.assertIn("리플레이 미지원", html)
+            self.assertIn("리플레이 없음", html)
             self.assertNotIn('name="race"', html)                          # 종족 정보 없음 → 종족 필터 없음
             self.assertIn("방 한판", html)
             self.assertNotIn("Solo", html)

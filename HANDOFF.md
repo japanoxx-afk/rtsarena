@@ -74,7 +74,10 @@ tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (�
   `{"id","time","room","map","players":[계정],"results":{계정:{"code":1|2|3,"at"}}}`. 코드 4(짧은 경기)는 서버가 내보내지 않는다.
 - players = 게임 중계(4901)에 들어온 계정. 1명이면 사이트가 가져오지 않음(혼자 만든 방).
 - 게임 안 랭킹(대기실 랭킹 메뉴)도 서버 1.3.58 에서 같은 규칙(1000+승×10−패×10, 점수→승→패→이름)으로 구현 → 사이트와 같음.
-- 종족 없음(서버가 모름), 맵은 방 정보에서 `.map` 이름을 찾을 때만. 리플레이 업로드 없음(경기 카드에 "리플레이 미지원").
+- 종족 없음(서버가 모름), 맵은 방 정보에서 `.map` 이름을 찾을 때만 (리플레이가 오면 리플레이 지도 이름으로 채움).
+- 리플레이: samchun 런처 1.3.58 `src/ArenaUpload.cs` 가 `POST /api/samchun/replays` 로 `.screplay`(ZIP, metadata.json 의 participants·multiplayer·ticks) 업로드.
+  `arena/games/samchun.py parse_replay` → `Store._ingest_samchun`: 호환 서버 기록(시간 ±15분·같은 계정)에 붙이고, 없으면 새 경기 → 나중 동기화 때 연결.
+  싱글(multiplayer=false 또는 이름 2명 미만)·진단 기록·체크섬 불일치는 422. 토큰은 라크무와 같은 ARENA_UPLOAD_TOKEN.
   → `arena/games/samchun.py` 의 RACES 가 비어 있으면 화면이 종족 필터·종족 통계를 숨기고 게임통계는 기본 통계(`Store.basic_stats`)를 보여 준다.
 - 설정: `SAMCHUN_MATCHES_FILE` (compose 기본값 `/mnt/game-servers/samchun-live/data/matches.json`) 또는 `SAMCHUN_MATCHES_URL`
   (호환 서버 `--http-port 4902` 의 `/matches.json`).
@@ -207,3 +210,4 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 - 2026-11-26: 삼국지천명2 추가 (드롭박스 선택 시 모든 메뉴·전적이 삼국지천명2 로 바뀜). samchun 저장소 서버 1.3.58 에
   게임 안 랭킹 + matches.json 내보내기 + NAS 배포(deploy/NAS_DEPLOY.md, 스택 `samchun`, 포트 4800/4901/4902) 를 함께 넣음.
   rtsarena NAS 반영: app/arena 덮어쓰기 + 스택 compose 를 이 저장소 deploy/compose.yaml 로 Update (SAMCHUN_MATCHES_FILE 추가).
+- 2026-11-26: 삼국지천명2 리플레이 업로드 (런처 1.3.58 자동 업로드 + 사이트 해석기). mono 로 런처 모듈을 빌드해 이 사이트에 실제 업로드 시험 통과.

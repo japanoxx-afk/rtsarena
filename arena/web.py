@@ -591,7 +591,8 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             n = 0
-        if n <= 0 or n > rakmu.MAX_REPLAY_BYTES:
+        limit = getattr(gmod(parts[1]) if len(parts) == 3 else rakmu, "MAX_REPLAY_BYTES", rakmu.MAX_REPLAY_BYTES)
+        if n <= 0 or n > limit:
             self.close_connection = True
             return self.json({"ok": False, "status": "rejected", "message": "파일 크기가 올바르지 않습니다"}, 413)
         # 본문을 먼저 다 읽는다: 읽지 않고 401 을 보내면 런처 쪽 전송이 끊겨(연결 재설정)
