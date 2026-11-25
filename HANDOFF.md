@@ -1,6 +1,6 @@
 # HANDOFF — RTS ARENA 전적 사이트 (다음 작업자 / 다른 PC / 다른 AI 용)
 
-최종 갱신: 2026-11-21
+최종 갱신: 2026-11-25 (작업 PC 변경: desktop-no0n2qb, 폴더 `C:\Users\seo\Documents\claud\rtsarena`)
 비밀번호·토큰은 여기에 적지 않는다.
 
 ## 1. 목표 (사용자 요구사항 원문 요약)
@@ -19,10 +19,12 @@
 |---|---|
 | 웹 사이트 (리더보드·전적기록·게임통계·맵통계·플레이어·다운로드) | 구현, PC 에서 실행·화면 확인 |
 | 게임 드롭박스 (라크무 / 임팩트 오브 파워=준비 중) | 구현 |
+| 다운로드 탭 `/<game>/download` (2026-11-25) | 구현, 테스트 추가. **NAS 반영 필요**. ① 최신 런처: new-rakum main `version.json` 을 10분마다 읽어 버튼·버전·SHA256 표시, `/rakmu/download/launcher` 는 항상 최신 exe 로 302 (주소는 new-rakum GitHub 경로만 허용, 실패 시 `data/launcher_latest.json` 의 마지막 값). ② 게임 설치파일: NAS 공유 링크를 새 창으로 |
+| 디스코드 버튼 (2026-11-25) | 모든 페이지 상단 오른쪽, 새 창. **NAS 반영 필요** |
 | 업로드 API `POST /api/rakmu/replays` + 싱글 거절 | 구현, 테스트 통과 |
 | 런처 자동 업로드 모듈 `launcher/rakmu/arena_upload.py` | 구현, 테스트 통과 |
 | 실제 리플레이 4개로 판정 확인 (C:\Users\seo\Downloads\replays) | 싱글 3개 skip, 대전 1개 upload — 맞음 |
-| new-rakum 런처에 연결 | **v0.9063, 브랜치 `launcher-v0.9063-arena-upload` 푸시함 (main 미병합)** — v0.9061(NAS 기본 서버) + main 의 v0.9062(벽 브러시) + 업로드. 작업 폴더 `C:\Users\seo\Documents\claud\rhakmu-arena` (git worktree). CI 테스트 목록 93개 통과, 런처 15초 실행 확인. GitHub Secret ARENA_UPLOAD_TOKEN 등록됨(사용자) |
+| new-rakum 런처에 연결 | **main 병합됨** — new-rakum main 의 런처 v0.9097·서버 0.9020 에 `arena_upload.py` 포함 (2026-11-24 확인). 업로드 토큰은 빌드 때 GitHub Secret ARENA_UPLOAD_TOKEN → `arena_secret.py` |
 | NAS 배포 (Portainer 스택) | **완료 2026-11-21** — http://akansas.synology.me:30013/ , 컨테이너 rtsarena-web healthy |
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
 | NAS 코드 업데이트 | **손으로** (File Station 덮어쓰기 + 재시작). 자동 배포는 계획만 — 5-1 |
@@ -124,6 +126,9 @@ Portainer 에서 `rtsarena-web` 을 재시작해야 한다 (수정이 잦아 매
 | RAKMU_SYNC_SECONDS | 60 | 결과 동기화 주기 |
 | ARENA_MATCH_WINDOW_MINUTES | 15 | 같은 경기로 볼 시간 차 |
 | ARENA_SITE_NAME | RTS ARENA | |
+| ARENA_DISCORD_URL | `https://discord.gg/YsYpTuHCh` | 모든 페이지 상단 오른쪽 디스코드 버튼. 비우면 숨김. discord.gg / discord.com/invite 주소만 받는다 |
+| RAKMU_LAUNCHER_VERSION_URL | new-rakum main `version.json` (raw.githubusercontent.com) | 최신 런처 정보. 비우면 최신 런처 버튼 숨김. 컨테이너가 GitHub 에 나갈 수 있어야 한다 |
+| RAKMU_INSTALL_URL | NAS 공유 링크 `https://akansas.synology.me:5001/sharing/1AywKfMKA` | 상단 "다운로드" 탭의 다운로드 링크. 바뀌면 이 환경변수만 바꾸면 된다 |
 
 ## 6. API
 
@@ -152,12 +157,12 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
 
 ## 8. 다음 할 일 (순서)
 
-1. `launcher-v0.9063-arena-upload` 의 CI exe 로 실제 대전 1판 → 사이트에 올라오는지 확인 → main 병합(= 사용자 자동 업데이트).
-   주의: main 에는 v0.9061(NAS 기본 서버)이 없었다. 이 브랜치를 병합하면 v0.9061 도 함께 배포된다.
+1. ~~런처 업로드 main 병합~~ (new-rakum main v0.9097 에 포함). 실제 대전 1판이 사이트에 올라오는지 확인은 남음.
+   2026-11-25: rtsarena 쪽 사본을 new-rakum main 과 같게 맞춤 (zlib.error 처리).
    arena_upload.py 를 고치면 rtsarena `launcher/rakmu/` 와 new-rakum 루트 두 곳을 똑같이 맞춘다.
 2. ~~NAS 에 rtsarena 스택 배포~~ (2026-11-21 완료).
 3. 리플레이 기록기에서 상대 이름 채우기, 결과코드 기록 (docs/RAKMU_SERVER_CHANGES.md A-1, A-2).
-4. ~~로비 서버 경기 ID·500판 제한·원자적 저장~~ (서버 0.9017, 브랜치 launcher-v0.9063-arena-upload). NAS rakmu-live/app 반영 필요.
+4. ~~로비 서버 경기 ID·500판 제한·원자적 저장~~ (서버 0.9017, 지금 main 은 0.9020). NAS rakmu-live/app 에 반영됐는지 확인 필요.
 5. ~~맵 미리보기·맵통계~~ (2026-11-21 완료). 새 맵이 생기면 게임이 설치된 PC 에서
    `python tools/render_map_previews.py --rakum <new-rakum 폴더>` → `arena/static/maps/rakmu/`, `arena/games/rakmu_maps.json` 커밋 후 NAS 에 올린다.
    목록에 없는 맵(다른 사람이 만든 맵)은 카드에 '미리보기 없음'으로 나온다.

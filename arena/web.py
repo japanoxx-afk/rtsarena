@@ -17,6 +17,7 @@ from . import games
 from .config import Config
 from .db import Database
 from .games import rakmu
+from .launcher_info import LauncherInfo
 from .rakmu_server import RakmuServerSource
 from .store import Store
 
@@ -42,7 +43,22 @@ def fmt_dur(sec) -> str:
 
 
 # ---------------------------------------------------------------- 공통 틀
-NAV = [("", "리더보드"), ("matches", "전적기록"), ("stats", "게임통계"), ("maps", "맵통계")]
+NAV = [("", "리더보드"), ("matches", "전적기록"), ("stats", "게임통계"), ("maps", "맵통계"), ("download", "다운로드")]
+
+
+DISCORD_ICON = ('<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="'
+                'M19.3 5.3A17 17 0 0 0 15 4l-.5 1.1a15.6 15.6 0 0 0-5 0L9 4a17 17 0 0 0-4.3 1.3C2 9.4 1.3 13.4 1.6 17.3'
+                'A17.2 17.2 0 0 0 6.9 20l1.1-1.8c-.6-.2-1.2-.5-1.7-.9l.4-.3a12.2 12.2 0 0 0 10.6 0l.4.3c-.5.4-1.1.7-1.7.9'
+                'l1.1 1.8a17.1 17.1 0 0 0 5.3-2.7c.4-4.5-.7-8.5-3.1-12zM8.7 14.9c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1'
+                ' 1.9.9 1.9 2.1-.8 2.1-1.9 2.1zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9.9 1.9 2.1-.8 2.1-1.9 2.1z"/></svg>')
+
+
+def discord_link(cfg: Config) -> str:
+    url = getattr(cfg, "discord_url", "")   # 설정 파일이 예전 것이어도 페이지는 뜨게
+    if not re.fullmatch(r"https://(discord\.gg|discord\.com/invite)/[A-Za-z0-9-]{2,40}", url or ""):
+        return ""
+    return (f'<a class="discord" href="{e(url)}" target="_blank" rel="noopener" title="디스코드 참여">'
+            f'{DISCORD_ICON}<span>디스코드</span></a>')
 
 
 def layout(cfg: Config, game: games.Game, active: str, body: str, title: str = "") -> str:
@@ -58,7 +74,7 @@ def layout(cfg: Config, game: games.Game, active: str, body: str, title: str = "
 <div class="topbar"><div class="topin">
 <a href="/{game.key}/" class="brand">{e(cfg.site_name)}</a>
 <select class="gamesel" aria-label="게임 선택" onchange="location.href='/'+this.value+'/{active}'">{opts}</select>
-<nav class="nav">{nav}</nav></div></div>
+<nav class="nav">{nav}</nav>{discord_link(cfg)}</div></div>
 <div class="wrap">{body}</div>
 <div class="sitefoot">{e(cfg.site_name)} · RTS 전적 기록 · 리플레이는 각 게임 런처가 경기 후 자동으로 올립니다</div>
 </body></html>"""
@@ -431,6 +447,40 @@ def page_map(cfg, store, game, name: str) -> str:
     return layout(cfg, game, "maps", body, name)
 
 
+def _fmt_size(n) -> str:
+    return f"{n / 1048576:.1f} MB" if n else ""
+
+
+def page_download(cfg, game, launcher: dict | None = None) -> str:
+    sections = ""
+    if game.key == "rakmu" and cfg.rakmu_launcher_version_url:
+        if launcher:
+            meta = " · ".join(x for x in (f"v{launcher['version']}", _fmt_size(launcher.get("size"))) if x)
+            sha = (f'<div class="dlurl">SHA256 <code>{e(launcher["sha256"])}</code></div>'
+                   if launcher.get("sha256") else "")
+            sections += f"""<div class="dlbox"><h2 class="dlh">최신 런처</h2>
+<a class="dlbtn" href="/{game.key}/download/launcher">⬇ 최신 런처 받기 <span class="dlver">{e(meta)}</span></a>{sha}
+<ul class="dlnote">
+<li>항상 GitHub 의 최신 버전으로 연결됩니다. 이미 설치했다면 런처를 그냥 켜기만 해도 자동으로 업데이트됩니다.</li>
+<li>이 주소를 공유해도 늘 최신 런처가 받아집니다: <code>/{game.key}/download/launcher</code></li>
+</ul></div>"""
+        else:
+            sections += ('<div class="dlbox"><h2 class="dlh">최신 런처</h2>'
+                         '<div class="empty">최신 런처 정보를 확인하는 중입니다. 잠시 뒤 새로고침하세요.</div></div>')
+    url = cfg.install_url(game.key)
+    if url and urllib.parse.urlsplit(url).scheme in ("http", "https"):
+        btn = (f'<a class="dlbtn" href="{e(url)}" target="_blank" rel="noopener">⬇ {e(game.title)} 설치파일 받기</a>'
+               f'<div class="dlurl">{e(url)}</div>')
+    else:
+        btn = '<div class="empty">설치파일 링크를 준비 중입니다.</div>'
+    sections += f"""<div class="dlbox"><h2 class="dlh">게임 설치파일</h2>{btn}
+<ul class="dlnote">
+<li>링크를 누르면 NAS 공유 페이지가 새 창으로 열립니다. 거기서 파일을 골라 다운로드하세요.</li>
+<li>사람끼리 한 대전은 경기가 끝나면 런처가 리플레이를 이 사이트에 자동으로 올립니다.</li>
+</ul></div>"""
+    return layout(cfg, game, "download", f"<h1>{e(game.title)} 다운로드</h1>{sections}", title="다운로드")
+
+
 def page_not_ready(cfg, game) -> str:
     return layout(cfg, game, "", f'<h1>{e(game.title)}</h1><div class="empty">이 게임의 전적 기록은 준비 중입니다.</div>')
 
@@ -526,6 +576,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.html(page_matches(self.cfg, self.store, game, params))
         if sub == "stats":
             return self.html(page_stats(self.cfg, self.store, game, params))
+        if sub == "download" and len(parts) == 3 and parts[2] == "launcher" and game.key == "rakmu":
+            info = self.launcher.get()
+            if not info:
+                return self.not_found()
+            return self._send(302, b"", "text/plain", {"Location": info["url"], "Cache-Control": "no-store"})
+        if sub == "download" and len(parts) == 2:
+            return self.html(page_download(self.cfg, game, self.launcher.get() if game.key == "rakmu" else None))
         if sub == "maps":
             return self.html(page_maps(self.cfg, self.store, game, params))
         if sub == "map" and len(parts) == 3:
@@ -572,7 +629,9 @@ def make_server(cfg: Config) -> tuple[ThreadingHTTPServer, Store]:
     db = Database(cfg.db_path)
     src = RakmuServerSource(cfg.rakmu_matches_file, cfg.rakmu_matches_url)
     store = Store(db, cfg.replay_dir, src, cfg.match_window_minutes)
-    handler = type("BoundHandler", (Handler,), {"cfg": cfg, "store": store})
+    launcher = LauncherInfo(cfg.rakmu_launcher_version_url, cfg.data_dir / "launcher_latest.json")
+    launcher.get()   # 시작하자마자 뒤에서 한 번 받아 둔다
+    handler = type("BoundHandler", (Handler,), {"cfg": cfg, "store": store, "launcher": launcher})
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), handler)
     return httpd, store
 

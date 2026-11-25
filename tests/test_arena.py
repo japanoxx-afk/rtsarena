@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -246,7 +247,8 @@ class HttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         os.environ.update({"ARENA_DATA_DIR": self.tmp, "ARENA_PORT": "0", "ARENA_HOST": "127.0.0.1",
-                           "ARENA_UPLOAD_TOKEN": "test-token", "RAKMU_MATCHES_FILE": "", "RAKMU_MATCHES_URL": ""})
+                           "ARENA_UPLOAD_TOKEN": "test-token", "RAKMU_MATCHES_FILE": "", "RAKMU_MATCHES_URL": "",
+                           "RAKMU_LAUNCHER_VERSION_URL": ""})   # 테스트에서는 GitHub 에 접속하지 않는다
         self.httpd, self.store = make_server(Config())
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -312,6 +314,66 @@ class HttpTests(unittest.TestCase):
         self.assertIsNotNone(self.store.db.one("SELECT units_made FROM match_players WHERE name=?", ("용사",))[0])
         self.assertEqual(self.get("/rakmu/map/" + urllib.parse.quote("(8) X-ice"))[0], 200)
         self.assertIn('class="mthumb"', self.get("/rakmu/matches")[1].decode())
+
+    def test_install_download_tab(self):
+        code, body, _ = self.get("/rakmu/download")
+        html = body.decode()
+        self.assertEqual(code, 200)
+        self.assertIn('href="https://akansas.synology.me:5001/sharing/1AywKfMKA"', html)
+        self.assertIn('href="/rakmu/download" class=active', html)
+        self.assertNotIn("최신 런처", html)                                         # 버전 주소를 비우면 숨김
+        self.assertIn('href="/rakmu/download"', self.get("/rakmu/")[1].decode())   # 모든 페이지 상단 탭
+
+    def test_discord_button_on_every_page(self):
+        for p in ("/rakmu/", "/rakmu/matches", "/rakmu/download", "/iop/"):
+            html = self.get(p)[1].decode()
+            self.assertIn('class="discord" href="https://discord.gg/YsYpTuHCh" target="_blank" rel="noopener"', html, p)
+        from arena.web import discord_link
+        cfg = self.httpd.RequestHandlerClass.cfg
+        for bad in ("", "https://evil.example/x", "http://discord.gg/abc", 'https://discord.gg/a"><script>'):
+            with mock.patch.object(cfg, "discord_url", bad):
+                self.assertEqual(discord_link(cfg), "", bad)
+
+    def test_latest_launcher_button_and_redirect(self):
+        from arena.launcher_info import LauncherInfo
+        ver = {"launcher_version": "0.9097",
+               "launcher_url": "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/RhakMuLauncher_v0.9097.exe",
+               "launcher_size": 39356221, "launcher_sha256": "28" * 32}
+        li = LauncherInfo("https://example/version.json", Path(self.tmp, "launcher_latest.json"),
+                          fetch=lambda u: json.dumps(ver).encode())
+        self.assertTrue(li.refresh())
+        self.httpd.RequestHandlerClass.launcher = li
+        self.httpd.RequestHandlerClass.cfg.rakmu_launcher_version_url = "https://example/version.json"
+        html = self.get("/rakmu/download")[1].decode()
+        self.assertIn("최신 런처 받기", html)
+        self.assertIn("v0.9097 · 37.5 MB", html)
+        self.assertIn("28" * 32, html)
+        opener = urllib.request.build_opener(type("NoRedir", (urllib.request.HTTPRedirectHandler,),
+                                                  {"redirect_request": lambda *a, **k: None}))
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            opener.open(self.url + "/rakmu/download/launcher", timeout=5)
+        self.assertEqual((cm.exception.code, cm.exception.headers["Location"]), (302, ver["launcher_url"]))
+        # 새 버전이 나오면 따라간다
+        ver.update(launcher_version="0.9098", launcher_url=ver["launcher_url"].replace("9097", "9098"))
+        self.assertTrue(li.refresh())
+        self.assertIn("v0.9098", self.get("/rakmu/download")[1].decode())
+        # 재시작해도 마지막 값 유지, 받기 실패 시 기존 값 유지
+        def boom(u):
+            raise OSError("offline")
+        li2 = LauncherInfo("https://example/version.json", Path(self.tmp, "launcher_latest.json"), fetch=boom)
+        self.assertFalse(li2.refresh())
+        self.assertEqual(li2.get()["version"], "0.9098")
+
+    def test_launcher_info_rejects_foreign_urls(self):
+        from arena.launcher_info import validate
+        good = {"launcher_version": "0.9097",
+                "launcher_url": "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/a.exe"}
+        self.assertIsNotNone(validate(good))
+        for bad_url in ("https://evil.example/a.exe", "http://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/a.exe",
+                        "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/../x/a.exe",
+                        "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/a.exe\"><script>"):
+            self.assertIsNone(validate(dict(good, launcher_url=bad_url)), bad_url)
+        self.assertIsNone(validate(dict(good, launcher_version="<b>")))
 
     def test_404(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
