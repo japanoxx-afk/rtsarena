@@ -16,7 +16,12 @@ Copy-Item (Join-Path $here 'compose.yaml') (Join-Path $out 'compose.yaml')
 Copy-Item (Join-Path $here 'NAS_DEPLOY.md') (Join-Path $out 'NAS_DEPLOY.md')
 
 $version = (Select-String -Path (Join-Path $repo 'arena\__init__.py') -Pattern '^__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-$commit = (git -C $repo rev-parse --short HEAD) 2>$null
+# git 이 없거나 git 폴더가 아니어도(ZIP 으로 받은 경우) 준비는 계속한다
+$commit = 'unknown'
+$ErrorActionPreference = 'Continue'
+try { $c = (& git -C $repo rev-parse --short HEAD 2>$null); if ($LASTEXITCODE -eq 0 -and $c) { $commit = "$c".Trim() } } catch { }
+$ErrorActionPreference = 'Stop'
+if ($commit -eq 'unknown') { Write-Warning "git 저장소가 아닙니다: $repo  (최신 코드인지 확인하세요 - 아래 안내)" }
 Set-Content -Path (Join-Path $out 'app\DEPLOYED_VERSION.txt') -Encoding ascii -Value @(
     "arena_version=$version",
     "git_commit=$commit",
