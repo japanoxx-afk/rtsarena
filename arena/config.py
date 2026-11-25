@@ -26,6 +26,18 @@ class Config:
         # 리플레이 시간과 로비 서버 기록 시간의 허용 차이(분)
         self.match_window_minutes = int(_env("ARENA_MATCH_WINDOW_MINUTES", "15"))
         self.site_name = _env("ARENA_SITE_NAME", "RTS ARENA")
+        # 설치파일 다운로드 탭 링크 (NAS File Station 공유 링크). 비우면 "준비 중" 으로 보인다.
+        self.rakmu_install_url = _env("RAKMU_INSTALL_URL", "https://akansas.synology.me:5001/sharing/1AywKfMKA")
+
+        # 상단 디스코드 버튼. 비우면 숨긴다. discord.gg / discord.com 주소만 쓴다.
+        self.discord_url = _env("ARENA_DISCORD_URL", "https://discord.gg/YsYpTuHCh")
+        # 최신 런처 정보 (런처 자동 업데이트와 같은 파일). 비우면 최신 런처 버튼을 숨긴다.
+        self.rakmu_launcher_version_url = _env(
+            "RAKMU_LAUNCHER_VERSION_URL",
+            "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/version.json")
+
+    def install_url(self, game_key: str) -> str:
+        return self.rakmu_install_url if game_key == "rakmu" else ""
 
     def lobby_sources(self) -> dict:
         """게임 키 -> (파일, URL). 로비/호환 서버 전적을 동기화할 게임들."""
