@@ -21,6 +21,8 @@ from pathlib import Path
 KEY = "rakmu"
 TITLE = "라크무"
 EXT = ".rkr"
+HAS_REPLAYS = True
+RULE_NOTE = "라크무 게임 내 랭킹과 같은 규칙"
 
 RACES = ("위국군", "아스트리아", "바르바로이")   # 종족 번호 0 무휼(Mu hŭl), 1 아렌(Aren), 2 마르두크(Marduke)
 RACE_COLORS = ("#e8944a", "#4a90e2", "#b46ae0")

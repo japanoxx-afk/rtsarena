@@ -28,7 +28,9 @@ services:
       ARENA_UPLOAD_TOKEN: ${ARENA_UPLOAD_TOKEN}
       # 라크무 로비 서버 전적(승패) — 같은 볼륨의 파일을 읽기만 한다
       RAKMU_MATCHES_FILE: /mnt/game-servers/rakmu-live/data/matches.json
-      RAKMU_SYNC_SECONDS: "60"
+      RAKMU_SYNC_SECONDS: "60"        # 모든 게임 공통 동기화 주기
+      # 삼국지천명2 호환 서버(samchun 스택) 전적 — 같은 볼륨. 서버를 아직 안 올렸으면 '파일 없음' 경고만 남고 사이트는 정상
+      SAMCHUN_MATCHES_FILE: ${SAMCHUN_MATCHES_FILE:-/mnt/game-servers/samchun-live/data/matches.json}
     ports:
       - "${WEB_PORT:-30013}:8080/tcp"
     volumes:

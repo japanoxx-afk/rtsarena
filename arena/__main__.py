@@ -40,10 +40,11 @@ def main():
             logging.getLogger("arena").info("예전 리플레이 %d개에서 플레이어 지표를 채움", n)
     except Exception:  # noqa: BLE001 - 지표는 없어도 사이트는 돈다
         logging.getLogger("arena").exception("플레이어 지표 채우기 실패")
-    if store.rakmu.configured:
+    if any(store.source(k) for k in store.sources):
         start_sync_thread(cfg, store)
-    logging.getLogger("arena").info("RTS ARENA on http://%s:%d (data=%s, rakmu=%s)", cfg.host, cfg.port, cfg.data_dir,
-                                    cfg.rakmu_matches_file or cfg.rakmu_matches_url or "미설정")
+    logging.getLogger("arena").info("RTS ARENA on http://%s:%d (data=%s, rakmu=%s, samchun=%s)", cfg.host, cfg.port,
+                                    cfg.data_dir, cfg.rakmu_matches_file or cfg.rakmu_matches_url or "미설정",
+                                    cfg.samchun_matches_file or cfg.samchun_matches_url or "미설정")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

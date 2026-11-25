@@ -60,6 +60,8 @@ ADDED_COLUMNS = {
     "match_players": [(c, "INTEGER") for c in PLAYER_STAT_COLUMNS],
     # 리플레이 머리의 시드·녹화 시작 시각 — 다시보기 녹화(같은 시드, 늦은 시각) 판별용
     "replays": [("seed", "INTEGER"), ("rec_date", "TEXT")],
+    # 로비 서버 기록의 방 제목 (삼국지천명2 호환 서버가 내보냄)
+    "matches": [("room", "TEXT")],
 }
 
 

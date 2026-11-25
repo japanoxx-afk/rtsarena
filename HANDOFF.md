@@ -1,6 +1,6 @@
 # HANDOFF — RTS ARENA 전적 사이트 (다음 작업자 / 다른 PC / 다른 AI 용)
 
-최종 갱신: 2026-11-21
+최종 갱신: 2026-11-26
 비밀번호·토큰은 여기에 적지 않는다.
 
 ## 1. 목표 (사용자 요구사항 원문 요약)
@@ -27,6 +27,7 @@
 | 라크무 서버/기록기 수정 | **안 함** — `docs/RAKMU_SERVER_CHANGES.md` (상대 이름 누락이 제일 중요) |
 | NAS 코드 업데이트 | **손으로** (File Station 덮어쓰기 + 재시작). 자동 배포는 계획만 — 5-1 |
 | 사이트 랭킹 = 게임 안 랭킹 | 2026-11-22 수정(98fe222): 다시보기 녹화 중복 제거 + 결과코드 판정. **NAS 반영 필요** |
+| **삼국지천명2 (드롭박스)** | 2026-11-26 구현·테스트 (21개 통과). 호환 서버 1.3.58(samchun 저장소)의 `data/matches.json` 을 1분마다 가져옴. 리더보드 = 게임 안 랭킹 (실제 서버 코드로 60판 만들어 대조, 완전 일치). **NAS: samchun 스택 배포 + rtsarena 코드·compose 업데이트 필요** |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
 
 ## 3. 구조
@@ -65,6 +66,21 @@ tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (�
   - 동기화 때마다 서버 방식으로 센 값과 리더보드를 비교해 다르면 arena.log 에 "게임 안 랭킹과 다른 계정" 경고.
   - 서버 0.9017 부터 matches.json 을 전부 보관(500판 제한 삭제)하므로 두 랭킹이 계속 같다. 0.9016 이전에 잘린 기록은 복구 불가.
 - 랭크/일반: 로비 서버 결과코드에 0x80 이 있으면 랭크게임.
+
+## 3-1. 삼국지천명2 (2026-11-26)
+
+- 기준: 호환 서버(`japanoxx-afk/samchun` `server/compat_server.py` 1.3.58)가 결과를 받을 때마다 쓰는
+  `game-servers/samchun-live/data/matches.json` (라크무 matches.json 과 같은 모양 → `rakmu_server.ServerRecord` 로 그대로 읽음).
+  `{"id","time","room","map","players":[계정],"results":{계정:{"code":1|2|3,"at"}}}`. 코드 4(짧은 경기)는 서버가 내보내지 않는다.
+- players = 게임 중계(4901)에 들어온 계정. 1명이면 사이트가 가져오지 않음(혼자 만든 방).
+- 게임 안 랭킹(대기실 랭킹 메뉴)도 서버 1.3.58 에서 같은 규칙(1000+승×10−패×10, 점수→승→패→이름)으로 구현 → 사이트와 같음.
+- 종족 없음(서버가 모름), 맵은 방 정보에서 `.map` 이름을 찾을 때만. 리플레이 업로드 없음(경기 카드에 "리플레이 미지원").
+  → `arena/games/samchun.py` 의 RACES 가 비어 있으면 화면이 종족 필터·종족 통계를 숨기고 게임통계는 기본 통계(`Store.basic_stats`)를 보여 준다.
+- 설정: `SAMCHUN_MATCHES_FILE` (compose 기본값 `/mnt/game-servers/samchun-live/data/matches.json`) 또는 `SAMCHUN_MATCHES_URL`
+  (호환 서버 `--http-port 4902` 의 `/matches.json`).
+- 동기화는 게임별 (`Store.import_server_records(game)`), `/healthz` 의 `sync.<게임>` 에 상태.
+- 새 게임 추가 방법: `arena/games/<key>.py` (TITLE, RACES…, map_display, map_image, HAS_REPLAYS, RULE_NOTE) + `games.GAMES` +
+  `Config.lobby_sources()`.
 
 ## 4. 라크무 리플레이(.rkr) 핵심 사실
 
@@ -188,3 +204,6 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
       (rakmu_server.server_results = server.py _recompute_winloss 와 같은 규칙).
   실제 리플레이 115개 + 실제 matches.json 으로 재현: 경기 17개 → 7개, 리더보드 = 게임 안 랭킹 (완전 일치).
 - 2026-11-22: 사용자가 "매번 이렇게(File Station 덮어쓰기+재시작) 해야 해?" → GitHub `live` 브랜치를 따라가는 자동 배포를 제안, 5-1 에 기록 (승인 대기, 아직 구현 안 함).
+- 2026-11-26: 삼국지천명2 추가 (드롭박스 선택 시 모든 메뉴·전적이 삼국지천명2 로 바뀜). samchun 저장소 서버 1.3.58 에
+  게임 안 랭킹 + matches.json 내보내기 + NAS 배포(deploy/NAS_DEPLOY.md, 스택 `samchun`, 포트 4800/4901/4902) 를 함께 넣음.
+  rtsarena NAS 반영: app/arena 덮어쓰기 + 스택 compose 를 이 저장소 deploy/compose.yaml 로 Update (SAMCHUN_MATCHES_FILE 추가).

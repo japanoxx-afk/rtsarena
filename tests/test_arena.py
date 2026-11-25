@@ -242,6 +242,88 @@ class RankingSyncTests(unittest.TestCase):
         self.assertEqual(st2.cleanup_playbacks(), 0)
 
 
+# 삼국지천명2 호환 서버(samchun server/compat_server.py 1.3.58) data/matches.json 과 같은 모양
+SAMCHUN_RAW = [
+    {"id": "a1", "time": "2026-11-25 20:00:00", "room": "한판", "map": "Duel", "players": ["Alpha", "Bravo"],
+     "results": {"Alpha": {"code": 1, "at": "2026-11-25 20:20:00"}, "Bravo": {"code": 2, "at": "2026-11-25 20:20:01"}}},
+    {"id": "a2", "time": "2026-11-25 21:00:00", "room": "두판", "map": "", "players": ["Alpha", "Bravo"],
+     "results": {"Alpha": {"code": 1, "at": "x"}, "Bravo": {"code": 2, "at": "x"}}},
+    {"id": "a3", "time": "2026-11-25 22:00:00", "room": "", "map": "", "players": ["Bravo", "Delta"],
+     "results": {"Bravo": {"code": 1, "at": "x"}, "Delta": {"code": 2, "at": "x"}}},
+    {"id": "a4", "time": "2026-11-25 23:00:00", "room": "", "map": "", "players": ["Delta", "Alpha"],
+     "results": {"Delta": {"code": 3, "at": "x"}, "Alpha": {"code": 3, "at": "x"}}},
+    {"id": "a5", "time": "2026-11-25 23:10:00", "room": "혼자", "map": "", "players": ["Solo"],
+     "results": {"Solo": {"code": 1, "at": "x"}}},                                   # 혼자: 제외
+    {"id": "a6", "time": "2026-11-25 23:30:00", "room": "진행 중", "map": "", "players": ["Alpha", "Delta"], "results": {}},
+]
+# 같은 기록으로 호환 서버 ranking.json 이 내는 순서 (점수, 승, 패, 무)
+SAMCHUN_SERVER_RANKING = [("Alpha", 1020, 2, 0, 1), ("Bravo", 990, 1, 2, 0), ("Delta", 990, 0, 1, 1)]
+
+
+class SamchunTests(unittest.TestCase):
+    """드롭박스 삼국지천명2: 호환 서버 matches.json → 리더보드(= 게임 안 랭킹)·전적기록."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_import_and_leaderboard_equals_in_game_ranking(self):
+        db = Database(Path(self.tmp) / "a.sqlite3")
+        st = Store(db, Path(self.tmp) / "replays", None, 15, {"samchun": FakeSource(SAMCHUN_RAW)})
+        self.assertEqual(st.import_rakmu_records()["created"], 0)          # 라크무는 설정 안 됨 → 아무것도 안 함
+        s = st.import_server_records("samchun")
+        self.assertEqual((s["created"], s["results"], s["mismatch"]), (5, 4, []))
+        self.assertEqual(st.import_server_records("samchun")["created"], 0)
+        lb = [(r["name"], r["points"], r["w"], r["l"], r["d"]) for r in st.leaderboard("samchun")]
+        self.assertEqual(lb, SAMCHUN_SERVER_RANKING)
+        self.assertEqual(st.leaderboard("rakmu"), [])                     # 게임끼리 섞이지 않는다
+        total, rows = st.match_rows("samchun")
+        self.assertEqual(total, 5)
+        self.assertEqual(rows[-1]["map_name"], "Duel")
+        self.assertEqual(rows[-1]["room"], "한판")
+        self.assertEqual(rows[-2]["map_name"], "맵 정보 없음")
+        self.assertIsNone(rows[0]["result_source"])                        # 결과 대기 중인 경기
+        self.assertEqual(st.basic_stats("samchun")["head"]["draws"], 1)
+        db.conn.close()
+
+    def test_pages(self):
+        path = Path(self.tmp) / "matches.json"
+        path.write_text(json.dumps(SAMCHUN_RAW, ensure_ascii=False), encoding="utf-8")
+        os.environ.update({"ARENA_DATA_DIR": self.tmp, "ARENA_PORT": "0", "ARENA_HOST": "127.0.0.1",
+                           "RAKMU_MATCHES_FILE": "", "RAKMU_MATCHES_URL": "",
+                           "SAMCHUN_MATCHES_FILE": str(path), "SAMCHUN_MATCHES_URL": ""})
+        try:
+            httpd, store = make_server(Config())
+        finally:
+            os.environ["SAMCHUN_MATCHES_FILE"] = ""
+        self.assertIsNone(store.source("rakmu"))
+        store.import_server_records("samchun")
+        url = f"http://127.0.0.1:{httpd.server_address[1]}"
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            def get(p):
+                with urllib.request.urlopen(url + p, timeout=5) as r:
+                    return r.status, r.read().decode()
+            code, html = get("/samchun/")
+            self.assertEqual(code, 200)
+            self.assertIn('<option value="samchun" selected>삼국지천명2</option>', html)
+            self.assertLess(html.index("Alpha"), html.index("Bravo"))
+            self.assertIn("1020", html)
+            self.assertIn('href="/samchun/matches"', html)                 # 메뉴가 삼국지천명2 주소로 바뀜
+            code, html = get("/samchun/matches")
+            self.assertIn("리플레이 미지원", html)
+            self.assertNotIn('name="race"', html)                          # 종족 정보 없음 → 종족 필터 없음
+            self.assertIn("방 한판", html)
+            self.assertNotIn("Solo", html)
+            for p in ("/samchun/stats", "/samchun/maps", "/samchun/player/Alpha", "/samchun/map/Duel",
+                      "/samchun/matches?player=Delta", "/api/samchun/matches.json", "/rakmu/", "/rakmu/stats"):
+                self.assertEqual(get(p)[0], 200, p)
+            self.assertIn("시간대별 경기 수", get("/samchun/stats")[1])
+            self.assertIn('<option value="rakmu">라크무</option>', get("/samchun/stats")[1])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

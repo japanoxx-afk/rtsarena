@@ -64,17 +64,24 @@ def layout(cfg: Config, game: games.Game, active: str, body: str, title: str = "
 </body></html>"""
 
 
+def gmod(game_key: str):
+    """게임별 해석 모듈 (RACES·맵 그림 등). 모듈이 없는 게임은 라크무 기본값."""
+    g = games.get(game_key)
+    return g.module if g and g.module else rakmu
+
+
 def race_badge(game_key: str, race) -> str:
-    if game_key == "rakmu":
-        if isinstance(race, int) and 0 <= race < len(rakmu.RACES):
-            return (f'<span class="rbadge" style="background:{rakmu.RACE_COLORS[race]}" '
-                    f'title="{e(rakmu.RACES[race])}">{e(rakmu.RACE_LETTERS[race])}</span>')
-        return '<span class="rbadge rb-none" title="랜덤/기타">?</span>'
-    return ""
+    mod = gmod(game_key)
+    if not mod.RACES:
+        return ""
+    if isinstance(race, int) and 0 <= race < len(mod.RACES):
+        return (f'<span class="rbadge" style="background:{mod.RACE_COLORS[race]}" '
+                f'title="{e(mod.RACES[race])}">{e(mod.RACE_LETTERS[race])}</span>')
+    return '<span class="rbadge rb-none" title="랜덤/기타">?</span>'
 
 
 def race_name(game_key: str, race) -> str:
-    return rakmu.race_name(race) if game_key == "rakmu" else str(race)
+    return gmod(game_key).race_name(race)
 
 
 def res_tag(r) -> str:
@@ -122,9 +129,12 @@ def match_card(game_key: str, m: dict) -> str:
         '<span class="rktag rktag-normal">일반게임</span>'
     src = {"server": "로비 서버 결과 (랭킹 반영)", "replay": "리플레이로 추정 (랭킹 미반영)"}.get(
         m.get("result_source"), "결과 미확인 (랭킹 미반영)")
+    mod = gmod(game_key)
     if m["replays"]:
         dl = (f'<a class="rbtn" href="/download/{e(m["hash"])}" title="리플레이 다운로드">리플레이 ⬇</a>'
               f'<span class="dlbox" title="다운로드 수">{m["downloads"]}</span>')
+    elif not getattr(mod, "HAS_REPLAYS", True):
+        dl = '<span class="rbtn rbtn-off" title="이 게임은 아직 런처 리플레이 업로드를 지원하지 않습니다">리플레이 미지원</span>'
     else:
         dl = '<span class="rbtn rbtn-off" title="이 경기를 한 플레이어의 런처가 리플레이를 올리지 않았습니다">리플레이 없음</span>'
     dur = fmt_dur(m["duration"]) if m["duration"] else "시간 정보 없음"
@@ -132,11 +142,16 @@ def match_card(game_key: str, m: dict) -> str:
         f'<li><a href="/download/{e(m["hash"])}?r={r["id"]}">{e(r["filename"])}</a> '
         f'<span class="dim">{r["size"] // 1024}KB · {fmt_dur(r["duration"])} · 올린 사람 {e(r["uploader"] or "-")}</span></li>'
         for r in m["replays"])
+    race_td = (lambda p: f'<td>{race_badge(game_key, p["race"])} {e(race_name(game_key, p["race"]))}</td>') if mod.RACES \
+        else (lambda p: "")
     detail_players = "".join(
-        f'<tr><td>{race_badge(game_key, p["race"])} {e(race_name(game_key, p["race"]))}</td><td>{plink(game_key, p["name"])}</td>'
+        f'<tr>{race_td(p)}<td>{plink(game_key, p["name"])}</td>'
         f'<td>{res_tag(p.get("result"))}</td><td class="dim">슬롯 {p["slot"] + 1}</td></tr>' for p in ps)
     played = m["played_at"][:16]
-    img = rakmu.map_image(m["map_name"]) if game_key == "rakmu" else ""
+    rplist = (f'<div class="rplist">리플레이 ({len(m["replays"])}개, 같은 경기를 여러 플레이어가 올리면 모두 보관)<ul>{reps}</ul></div>'
+              if getattr(mod, "HAS_REPLAYS", True) or m["replays"] else "")
+    room = f' · 방 {e(m["room"])}' if m.get("room") else ""
+    img = mod.map_image(m["map_name"])
     thumb = (f'<a class="mthumb" href="/{game_key}/maps#map={q(m["map_name"])}" title="맵 정보"><img src="{img}" alt="" loading="lazy"></a>'
              if img else "")
     return f"""<div class="mcard"><div class="mbody">
@@ -146,8 +161,8 @@ def match_card(game_key: str, m: dict) -> str:
 <div class="mfoot"><span class="fdt">{e(played)}</span><div class="fbtns">{tag}{dl}</div></div></div></div>
 <details class="mdet"><summary>상세보기</summary><div class="detin">
 <table class="dtab"><tbody>{detail_players}</tbody></table>
-<div class="dim">승패: {e(src)} · 경기 ID {e(m['hash'][:12])}</div>
-<div class="rplist">리플레이 ({len(m['replays'])}개, 같은 경기를 여러 플레이어가 올리면 모두 보관)<ul>{reps}</ul></div>
+<div class="dim">승패: {e(src)} · 경기 ID {e(m['hash'][:12])}{room}</div>
+{rplist}
 </div></details></div>"""
 
 
@@ -158,21 +173,26 @@ def page_matches(cfg, store: Store, game, params) -> str:
     if f["race"] and not f["race"].isdigit():
         f["race"] = ""
     total, rows = store.match_rows(game.key, f["player"], f["race"], f["map"], f["gametype"], page, PER_PAGE)
+    mod = gmod(game.key)
     race_opts = "".join(f'<option value="{i}"{" selected" if f["race"] == str(i) else ""} style="color:{c}">■ {e(n)}</option>'
-                        for i, (n, c) in enumerate(zip(rakmu.RACES, rakmu.RACE_COLORS)))
+                        for i, (n, c) in enumerate(zip(mod.RACES, mod.RACE_COLORS)))
+    race_field = (f'<div><label>종족</label><select name="race"><option value="">전체</option>{race_opts}</select></div>'
+                  if mod.RACES else "")
     map_opts = "".join(f'<option value="{e(mp["map_name"])}"{" selected" if f["map"] == mp["map_name"] else ""}>'
                        f'{e(mp["map_name"])} ({mp["n"]})</option>' for mp in store.maps(game.key))
     gt = f["gametype"]
     form = f"""<form class="msearch" method="get" action="/{game.key}/matches">
 <div><label>플레이어 닉네임</label><input name="player" value="{e(f['player'])}" placeholder="닉네임" autocomplete="off"></div>
-<div><label>종족</label><select name="race"><option value="">전체</option>{race_opts}</select></div>
+{race_field}
 <div><label>게임유형</label><select name="gametype"><option value="">전체</option>
 <option value="rank"{" selected" if gt == "rank" else ""}>랭크게임</option>
 <option value="normal"{" selected" if gt == "normal" else ""}>일반게임</option></select></div>
 <div><label>맵</label><select name="map"><option value="">전체</option>{map_opts}</select></div>
 <div class="fbtn"><button type="submit">검색</button><a class="reset" href="/{game.key}/matches">초기화</a></div></form>"""
-    cards = "".join(match_card(game.key, m) for m in rows) or \
-        '<div class="empty">아직 기록된 경기가 없습니다. 런처로 대전(사람 2명 이상) 리플레이가 올라오면 여기에 표시됩니다.</div>'
+    empty = ('아직 기록된 경기가 없습니다. 런처로 대전(사람 2명 이상) 리플레이가 올라오면 여기에 표시됩니다.'
+             if getattr(mod, "HAS_REPLAYS", True) else
+             '아직 기록된 경기가 없습니다. 인터넷 서버에서 대전(사람 2명 이상)을 마치면 1분 안에 여기에 표시됩니다.')
+    cards = "".join(match_card(game.key, m) for m in rows) or f'<div class="empty">{e(empty)}</div>'
     body = (f'<div class="today">오늘 총 경기수: {store.today_count(game.key)} · 전체 {total}경기</div>{form}'
             f'{pager(total, page, f"/{game.key}/matches", f)}<div id="mlist">{cards}</div>'
             f'{pager(total, page, f"/{game.key}/matches", f)}')
@@ -190,7 +210,8 @@ def page_leaderboard(cfg, store, game, params) -> str:
         f'<td class="num pts">{r["points"]}</td><td class="num">{r["w"]}</td><td class="num">{r["l"]}</td>'
         f'<td class="num">{r["d"]}</td><td class="num">{_rate(r["rate"])}</td>'
         f'<td class="dim">{e((r["last"] or "")[:16])}</td></tr>' for r in rows)
-    body = f"""<h1>리더보드</h1><p class="dim">점수 = 1000 + 승×10 − 패×10 (라크무 게임 내 랭킹과 같은 규칙). 사람 2명 이상 경기만 집계합니다.</p>
+    note = getattr(gmod(game.key), "RULE_NOTE", "게임 내 랭킹과 같은 규칙")
+    body = f"""<h1>리더보드</h1><p class="dim">점수 = 1000 + 승×10 − 패×10 ({e(note)}). 사람 2명 이상 경기만 집계합니다.</p>
 <div class="tblwrap"><table class="tbl"><thead><tr><th>#</th><th>플레이어</th><th>점수</th><th>승</th><th>패</th><th>무</th><th>승률</th><th>최근 경기</th></tr></thead>
 <tbody>{trs or '<tr><td colspan=8 class="empty">기록 없음</td></tr>'}</tbody></table></div>"""
     return layout(cfg, game, "", body, "리더보드")
@@ -211,22 +232,44 @@ def page_player(cfg, store, game, name, params) -> str:
     return layout(cfg, game, "", head + f'<h2>최근 경기</h2><div id="mlist">{cards}</div>', name)
 
 
+def page_stats_basic(cfg, store, game) -> str:
+    """종족 정보가 없는 게임: 경기·플레이어 수, 무승부 비율, 경기 많은 플레이어, 요일·시간대."""
+    st = store.basic_stats(game.key)
+    h = st["head"]
+    top = "".join(
+        f'<tr><td>{plink(game.key, r["name"])}</td><td class="num">{r["n"]}</td><td class="num">{r["w"] or 0}</td>'
+        f'<td class="num">{r["l"] or 0}</td><td class="num">{r["d"] or 0}</td></tr>' for r in st["top"])
+    hours = "".join(f'<td class="num">{st["hours"].get(f"{hh:02d}", 0)}</td>' for hh in range(0, 24, 1))
+    hhead = "".join(f"<th>{hh}</th>" for hh in range(24))
+    body = f"""<h1>게임통계</h1>
+<div class="pstats"><div><b>{h["n"] or 0}</b>경기</div><div><b>{h["players"] or 0}</b>명 참가</div>
+<div>무승부 <b>{h["draws"] or 0}</b>경기</div><div>결과 미확인 <b>{h["unknown"] or 0}</b>경기</div></div>
+<h2>경기를 많이 한 플레이어</h2><div class="tblwrap"><table class="tbl"><thead><tr><th>플레이어</th><th>경기</th><th>승</th><th>패</th><th>무</th></tr></thead>
+<tbody>{top or '<tr><td colspan=5 class="empty">기록 없음</td></tr>'}</tbody></table></div>
+<h2>시간대별 경기 수</h2><div class="tblwrap"><table class="tbl"><thead><tr>{hhead}</tr></thead><tbody><tr>{hours}</tr></tbody></table></div>
+<p class="dim">이 게임은 서버가 종족을 알 수 없어 종족별 승률·상성은 없습니다.</p>"""
+    return layout(cfg, game, "stats", body, "게임통계")
+
+
 def page_stats(cfg, store, game, params) -> str:
+    mod = gmod(game.key)
+    if not mod.RACES:
+        return page_stats_basic(cfg, store, game)
     st = store.race_stats(game.key)
     rows = ""
-    for i, n in enumerate(rakmu.RACES):
+    for i, n in enumerate(mod.RACES):
         p = st["per"].get(i) or {"n": 0, "w": 0, "l": 0}
         w, l = p["w"] or 0, p["l"] or 0
         rate = f"{100 * w / (w + l):.1f}%" if w + l else "-"
         rows += f'<tr><td>{race_badge(game.key, i)} {e(n)}</td><td class="num">{p["n"]}</td><td class="num">{w}</td><td class="num">{l}</td><td class="num">{rate}</td></tr>'
-    head = "".join(f"<th>vs {race_badge(game.key, j)}</th>" for j in range(len(rakmu.RACES)))
+    head = "".join(f"<th>vs {race_badge(game.key, j)}</th>" for j in range(len(mod.RACES)))
     grid = ""
-    for i in range(len(rakmu.RACES)):
+    for i in range(len(mod.RACES)):
         cells = ""
-        for j in range(len(rakmu.RACES)):
+        for j in range(len(mod.RACES)):
             w, l = st["vs"].get((i, j), (0, 0))
             cells += f'<td class="num">{f"{100 * w / (w + l):.0f}% <span class=dim>({w}-{l})</span>" if w + l else "-"}</td>'
-        grid += f"<tr><th>{race_badge(game.key, i)} {e(rakmu.RACES[i])}</th>{cells}</tr>"
+        grid += f"<tr><th>{race_badge(game.key, i)} {e(mod.RACES[i])}</th>{cells}</tr>"
     body = f"""<h1>게임통계</h1><h2>종족별 승률</h2><div class="tblwrap"><table class="tbl"><thead><tr><th>종족</th><th>출전</th><th>승</th><th>패</th><th>승률</th></tr></thead>
 <tbody>{rows}</tbody></table></div><h2>종족 상성 (1:1, 행 종족 기준 승률)</h2>
 <div class="tblwrap"><table class="tbl"><thead><tr><th></th>{head}</tr></thead><tbody>{grid}</tbody></table></div>"""
@@ -235,11 +278,12 @@ def page_stats(cfg, store, game, params) -> str:
 
 def _map_list(store, game) -> list[dict]:
     """맵 카드 목록: 경기가 있는 맵(많은 순) 다음에 아직 경기가 없는 맵(맵 목록 순)."""
+    mod = gmod(game.key)
     out, seen = [], set()
     for m in store.maps(game.key):
-        out.append({**(rakmu.map_info(m["map_name"]) or {}), **m, "name": m["map_name"]})
+        out.append({**(mod.map_info(m["map_name"]) or {}), **m, "name": m["map_name"]})
         seen.add(m["map_name"])
-    for c in rakmu.map_catalog():
+    for c in mod.map_catalog():
         if c["name"] not in seen:
             out.append({**c, "n": 0, "avg_dur": None, "last": None, "ranked": 0})
     return out
@@ -247,8 +291,9 @@ def _map_list(store, game) -> list[dict]:
 
 def page_maps(cfg, store, game, params) -> str:
     cards = ""
+    mod = gmod(game.key)
     for m in _map_list(store, game):
-        img = rakmu.map_image(m["name"])
+        img = mod.map_image(m["name"])
         thumb = f'<img src="{img}" alt="" loading="lazy">' if img else '<span class="mxnoimg">미리보기 없음</span>'
         badge = '<span class="mxrkbadge">랭크맵</span>' if m.get("ranked") else ""
         cnt = f'<b>{m["n"]}</b>경기' if m["n"] else "0경기"
@@ -346,11 +391,12 @@ def _rate_cell(w: int, l: int) -> tuple[str, str]:
 
 def map_detail(store, game, name: str) -> str:
     """맵 하나의 통계 (맵통계 창 안에 들어가는 조각, /<game>/map/<이름>?frag=1)."""
-    info = rakmu.map_info(name) or {}
+    mod = gmod(game.key)
+    info = mod.map_info(name) or {}
     st = store.map_stats(game.key, name)
     h = st["head"]
-    races = range(len(rakmu.RACES))
-    img = rakmu.map_image(name)
+    races = range(len(mod.RACES))
+    img = mod.map_image(name)
     pic = f'<img src="{img}" alt="{e(name)} 미리보기">' if img else '<span class="mxnoimg">미리보기 없음</span>'
     facts = ""
     if info:
@@ -389,16 +435,18 @@ def map_detail(store, game, name: str) -> str:
     unk_note = f'<div class="msnote">종족을 모르는 참가 {unk}명은 빠져 있습니다 (리플레이가 없는 경기).</div>' if unk else ""
     matrix = f"""<table class="mrtbl"><thead><tr><th colspan="2" class="mrtot">총 진행게임 수<b>{h["n"] or 0}전</b></th>{head_cells}</tr></thead>
 <tbody>{body_rows}</tbody></table>{unk_note}"""
-    sec1 = f"""<section class="msec"><h3>종족별 승률</h3><div class="mrwrap">
+    if not mod.RACES:
+        matrix = f'<div class="pstats"><div><b>{h["n"] or 0}</b>경기</div></div>'
+    sec1 = f"""<section class="msec"><h3>{"종족별 승률" if mod.RACES else "경기 수"}</h3><div class="mrwrap">
 <div class="mrpic"><div class="mrimg">{pic}</div><div class="mrfacts">{facts}</div></div>
 <div class="mrright">{matrix}</div></div></section>"""
 
     # ---- 통계 지표
     data = {"metrics": METRICS, "entries": st["entries"]}
     rbtns = '<button class="msrb on" data-race="all">전체</button>' + "".join(
-        f'<button class="msrb" data-race="{i}"><span style="background:{rakmu.RACE_COLORS[i]}">{e(rakmu.RACES[i])}</span></button>'
+        f'<button class="msrb" data-race="{i}"><span style="background:{mod.RACE_COLORS[i]}">{e(mod.RACES[i])}</span></button>'
         for i in races)
-    opps = '<option value="all">전체</option>' + "".join(f'<option value="{i}">{e(rakmu.RACES[i])}</option>' for i in races)
+    opps = '<option value="all">전체</option>' + "".join(f'<option value="{i}">{e(mod.RACES[i])}</option>' for i in races)
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     sec2 = f"""<section class="msec mstats"><h3>통계 지표</h3>
 <div class="msbar"><div class="msraces">{rbtns}</div><div class="msright"><label>상대 <select class="msopp">{opps}</select></label>
@@ -570,44 +618,52 @@ class Handler(BaseHTTPRequestHandler):
 
 def make_server(cfg: Config) -> tuple[ThreadingHTTPServer, Store]:
     db = Database(cfg.db_path)
-    src = RakmuServerSource(cfg.rakmu_matches_file, cfg.rakmu_matches_url)
-    store = Store(db, cfg.replay_dir, src, cfg.match_window_minutes)
+    srcs = {k: RakmuServerSource(f, u) for k, (f, u) in cfg.lobby_sources().items()}
+    store = Store(db, cfg.replay_dir, srcs.pop("rakmu"), cfg.match_window_minutes, srcs)
     handler = type("BoundHandler", (Handler,), {"cfg": cfg, "store": store})
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), handler)
     return httpd, store
 
 
 def start_sync_thread(cfg: Config, store: Store) -> threading.Thread:
+    """설정된 모든 게임의 로비(호환) 서버 전적을 RAKMU_SYNC_SECONDS 마다 가져온다."""
     stop = threading.Event()
+    keys = [k for k in store.sources if store.source(k)]
+    SYNC_STATUS.update(enabled=True)
+    for k in keys:
+        src = store.sources[k]
+        SYNC_STATUS[k] = {"source": str(src.file or src.url)}
 
-    SYNC_STATUS.update(enabled=True, source=str(store.rakmu.file or store.rakmu.url))
-
-    def sync_once():
+    def sync_once(key):
         import datetime as _dt
-        SYNC_STATUS["last_run"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st = SYNC_STATUS[key]
+        st["last_run"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        src = store.sources[key]
         try:
-            s = store.import_rakmu_records()
-            SYNC_STATUS.update(error=store.rakmu.last_error, server_records=len(store.rakmu.records()),
-                               created=s["created"], linked=s["linked"], results=s["results"],
-                               playbacks_removed=SYNC_STATUS.get("playbacks_removed", 0) + s.get("playbacks_removed", 0),
-                               mismatch=len(s["mismatch"]))
+            s = store.import_server_records(key)
+            st.update(error=src.last_error, server_records=len(src.records()),
+                      created=s["created"], linked=s["linked"], results=s["results"],
+                      playbacks_removed=st.get("playbacks_removed", 0) + s.get("playbacks_removed", 0),
+                      mismatch=len(s["mismatch"]))
             if s["created"] or s["linked"] or s["results"]:
-                log.info("로비 서버 동기화: 새 경기 %d, 리플레이 경기 연결 %d, 승패 반영 %d",
-                         s["created"], s["linked"], s["results"])
+                log.info("[%s] 로비 서버 동기화: 새 경기 %d, 리플레이 경기 연결 %d, 승패 반영 %d",
+                         key, s["created"], s["linked"], s["results"])
             if s.get("playbacks_removed"):
                 log.info("다시보기 녹화 리플레이 %d개 정리", s["playbacks_removed"])
             if s["mismatch"]:
-                log.warning("게임 안 랭킹과 다른 계정 %d명: %s", len(s["mismatch"]), ", ".join(s["mismatch"][:20]))
+                log.warning("[%s] 게임 안 랭킹과 다른 계정 %d명: %s", key, len(s["mismatch"]), ", ".join(s["mismatch"][:20]))
         except Exception as e:  # noqa: BLE001
-            SYNC_STATUS["error"] = f"{type(e).__name__}: {e}"
-            log.exception("로비 서버 동기화 실패")
+            st["error"] = f"{type(e).__name__}: {e}"
+            log.exception("[%s] 로비 서버 동기화 실패", key)
 
     def loop():
-        sync_once()                       # 시작하자마자 한 번
-        while not stop.wait(cfg.rakmu_sync_seconds):
-            sync_once()
+        while True:
+            for k in keys:                # 시작하자마자 한 번, 그다음 주기마다
+                sync_once(k)
+            if stop.wait(cfg.rakmu_sync_seconds):
+                return
 
-    t = threading.Thread(target=loop, name="rakmu-sync", daemon=True)
+    t = threading.Thread(target=loop, name="lobby-sync", daemon=True)
     t.stop = stop  # type: ignore[attr-defined]
     t.start()
     return t
