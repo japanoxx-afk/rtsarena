@@ -42,9 +42,10 @@ def main():
         logging.getLogger("arena").exception("플레이어 지표 채우기 실패")
     if any(store.source(k) for k in store.sources):
         start_sync_thread(cfg, store)
-    logging.getLogger("arena").info("RTS ARENA on http://%s:%d (data=%s, rakmu=%s, samchun=%s)", cfg.host, cfg.port,
+    logging.getLogger("arena").info("RTS ARENA on http://%s:%d (data=%s, rakmu=%s, samchun=%s, wanggun=%s)", cfg.host, cfg.port,
                                     cfg.data_dir, cfg.rakmu_matches_file or cfg.rakmu_matches_url or "미설정",
-                                    cfg.samchun_matches_file or cfg.samchun_matches_url or "미설정")
+                                    cfg.samchun_matches_file or cfg.samchun_matches_url or "미설정",
+                                    cfg.wanggun_matches_file or cfg.wanggun_matches_url or "미설정")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

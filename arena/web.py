@@ -16,7 +16,7 @@ from pathlib import Path
 from . import games
 from .config import Config
 from .db import Database
-from .games import rakmu
+from .games import rakmu, wanggun
 from .launcher_info import LauncherInfo
 from .rakmu_server import RakmuServerSource
 from .store import Store
@@ -523,6 +523,13 @@ def page_download(cfg, game, launcher: dict | None = None) -> str:
 <li>맨 위 버전의 <code>launcher.exe</code> 를 받습니다. 이미 설치했다면 런처를 켜기만 해도 자동으로 업데이트됩니다.</li>
 <li>런처 1.3.58 부터 인터넷 대전 리플레이가 이 사이트에 자동으로 올라옵니다.</li>
 </ul></div>"""
+    if game.key == "wanggun":
+        sections += f"""<div class="dlbox"><h2 class="dlh">최신 런처</h2>
+<a class="dlbtn" href="{wanggun.RELEASES_URL}" target="_blank" rel="noopener">⬇ 태조왕건 런처 (GitHub 릴리스)</a>
+<ul class="dlnote">
+<li>맨 위 버전의 런처 exe 를 받습니다. 런처의 IP 칸에 서버 주소를 넣고 <b>IP 적용</b> 을 누르면 인터넷 서버로 접속합니다.</li>
+<li>사람끼리 한 대전은 게임이 끝나면 1분 안에 이 사이트 전적에 올라옵니다 (리플레이는 아직 미지원).</li>
+</ul></div>"""
     url = cfg.install_url(game.key)
     if url and urllib.parse.urlsplit(url).scheme in ("http", "https"):
         btn = (f'<a class="dlbtn" href="{e(url)}" target="_blank" rel="noopener">⬇ {e(game.title)} 설치파일 받기</a>'
@@ -532,7 +539,7 @@ def page_download(cfg, game, launcher: dict | None = None) -> str:
     sections += f"""<div class="dlbox"><h2 class="dlh">게임 설치파일</h2>{btn}
 <ul class="dlnote">
 <li>링크를 누르면 NAS 공유 페이지가 새 창으로 열립니다. 거기서 파일을 골라 다운로드하세요.</li>
-<li>사람끼리 한 대전은 경기가 끝나면 런처가 리플레이를 이 사이트에 자동으로 올립니다.</li>
+{"<li>사람끼리 한 대전은 경기가 끝나면 런처가 리플레이를 이 사이트에 자동으로 올립니다.</li>" if getattr(gmod(game.key), "HAS_REPLAYS", True) else ""}
 </ul></div>"""
     return layout(cfg, game, "download", f"<h1>{e(game.title)} 다운로드</h1>{sections}", title="다운로드")
 

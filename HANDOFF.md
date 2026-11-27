@@ -1,6 +1,6 @@
 # HANDOFF — RTS ARENA 전적 사이트 (다음 작업자 / 다른 PC / 다른 AI 용)
 
-최종 갱신: 2026-11-26 (작업 PC: desktop-no0n2qb. 예전 폴더 `C:\Users\seo\Documents\claud\rtsarena` 는 git 이 아니었음 → 그 작업을 main 에 합침. 이제 `rtsarena-new` (git clone) 에서 작업)
+최종 갱신: 2026-11-28 (작업 PC: desktop-no0n2qb. 예전 폴더 `C:\Users\seo\Documents\claud\rtsarena` 는 git 이 아니었음 → 그 작업을 main 에 합침. 이제 `rtsarena-new` (git clone) 에서 작업)
 비밀번호·토큰은 여기에 적지 않는다.
 
 ## 1. 목표 (사용자 요구사항 원문 요약)
@@ -30,6 +30,7 @@
 | NAS 코드 업데이트 | **손으로** (File Station 덮어쓰기 + 재시작). 자동 배포는 계획만 — 5-1 |
 | 사이트 랭킹 = 게임 안 랭킹 | 2026-11-22 수정(98fe222): 다시보기 녹화 중복 제거 + 결과코드 판정. **NAS 반영 필요** |
 | **삼국지천명2 (드롭박스)** | 2026-11-26 구현·테스트 (21개 통과). 호환 서버 1.3.58(samchun 저장소)의 `data/matches.json` 을 1분마다 가져옴. 리더보드 = 게임 안 랭킹 (실제 서버 코드로 60판 만들어 대조, 완전 일치). **NAS: samchun 스택 배포 + rtsarena 코드·compose 업데이트 필요** |
+| **태조왕건 (드롭박스)** | 2026-11-28 구현·테스트. 더미서버 2.0(wanggun 저장소)의 `data/matches.json` 을 1분마다 가져옴. 리더보드 = 게임 안 순위 (실제 서버로 만든 기록으로 대조). 리플레이 없음. **NAS: wanggun 스택 배포(wanggun deploy/NAS_DEPLOY.md) + rtsarena 코드·compose 업데이트 필요** |
 | 참고 사이트 방문 | HTTPS 는 연결 거부, `curl http://jw2-arena.com/matches` 는 됨 (구조 참고용) |
 
 ## 3. 구조
@@ -86,6 +87,16 @@ tools/render_map_previews.py     맵 미리보기 PNG + 맵 목록 만들기 (�
 - 동기화는 게임별 (`Store.import_server_records(game)`), `/healthz` 의 `sync.<게임>` 에 상태.
 - 새 게임 추가 방법: `arena/games/<key>.py` (TITLE, RACES…, map_display, map_image, HAS_REPLAYS, RULE_NOTE) + `games.GAMES` +
   `Config.lobby_sources()`.
+
+## 3-2. 태조왕건 (2026-11-28)
+
+- 기준: 더미서버(`japanoxx-afk/wanggun` `dummyserver.py` 2.0)가 결과(0x24FF)를 받을 때마다 쓰는
+  `game-servers/wanggun-live/data/matches.json` (같은 모양 → `rakmu_server.ServerRecord`). 추가 필드 `started`(방 생성 시각), `dis`.
+- 서버는 첫 결과 보고 때 그 방의 참가자 명단으로 경기를 만들고 나머지 보고를 붙인다. 방 명단은 방 TTL(10분)과 따로 6시간 기억.
+- 결과코드 1 승 / 2 패 / 3 무. Dis(1~3 외 코드)는 게임 안 전적처럼 패(2)로 내보낸다 → 사이트 = 게임 안 순위.
+- 서버 2.0 부터 사람 2명 이상 경기만 게임 안 순위에 넣는다 (사이트와 같은 기준). `WANGGUN_COUNT_SOLO=1` 이면 예전처럼 전부.
+- 맵: 방 정보 detail 의 맵 이름(best-effort). 종족 없음. 서버 HTTP `:9010/matches.json` 도 있음 → `WANGGUN_MATCHES_URL`.
+- 설정: `WANGGUN_MATCHES_FILE` (compose 기본값 `/mnt/game-servers/wanggun-live/data/matches.json`).
 
 ## 4. 라크무 리플레이(.rkr) 핵심 사실
 
@@ -216,3 +227,4 @@ python tools/demo_seed.py; $env:ARENA_DATA_DIR="data-demo"; python -m arena
   게임 안 랭킹 + matches.json 내보내기 + NAS 배포(deploy/NAS_DEPLOY.md, 스택 `samchun`, 포트 4800/4901/4902) 를 함께 넣음.
   rtsarena NAS 반영: app/arena 덮어쓰기 + 스택 compose 를 이 저장소 deploy/compose.yaml 로 Update (SAMCHUN_MATCHES_FILE 추가).
 - 2026-11-26: 삼국지천명2 리플레이 업로드 (런처 1.3.58 자동 업로드 + 사이트 해석기). mono 로 런처 모듈을 빌드해 이 사이트에 실제 업로드 시험 통과.
+- 2026-11-28: 태조왕건 추가 (드롭박스). wanggun 더미서버 2.0 에 경기 기록(matches.json)·전적 HTTP·NAS 스택(deploy/) 을 함께 넣음.

@@ -23,6 +23,9 @@ class Config:
         # 삼국지천명2 호환 서버(samchun compat_server.py)의 전적 기록 — 라크무와 같은 matches.json 형식
         self.samchun_matches_file = _env("SAMCHUN_MATCHES_FILE")
         self.samchun_matches_url = _env("SAMCHUN_MATCHES_URL")
+        # 태조왕건 더미서버(wanggun dummyserver.py 2.0+)의 전적 기록 — 같은 matches.json 형식
+        self.wanggun_matches_file = _env("WANGGUN_MATCHES_FILE")
+        self.wanggun_matches_url = _env("WANGGUN_MATCHES_URL")
         # 리플레이 시간과 로비 서버 기록 시간의 허용 차이(분)
         self.match_window_minutes = int(_env("ARENA_MATCH_WINDOW_MINUTES", "15"))
         self.site_name = _env("ARENA_SITE_NAME", "RTS ARENA")
@@ -42,7 +45,8 @@ class Config:
     def lobby_sources(self) -> dict:
         """게임 키 -> (파일, URL). 로비/호환 서버 전적을 동기화할 게임들."""
         return {"rakmu": (self.rakmu_matches_file, self.rakmu_matches_url),
-                "samchun": (self.samchun_matches_file, self.samchun_matches_url)}
+                "samchun": (self.samchun_matches_file, self.samchun_matches_url),
+                "wanggun": (self.wanggun_matches_file, self.wanggun_matches_url)}
 
     @property
     def db_path(self) -> Path:

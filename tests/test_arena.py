@@ -591,3 +591,56 @@ class DbRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# 태조왕건 더미서버(wanggun dummyserver.py 2.0) data/matches.json 과 같은 모양
+WANGGUN_RAW = [
+    {"id": "w1", "time": "2026-11-27 20:30:00", "started": "2026-11-27 20:00:00", "room": "즐겜방", "map": "고려벌판.map",
+     "players": ["왕건", "견훤"],
+     "results": {"견훤": {"code": 2, "at": "2026-11-27 20:30:00"}, "왕건": {"code": 1, "at": "2026-11-27 20:30:01"}}},
+    {"id": "w2", "time": "2026-11-27 21:30:00", "started": "2026-11-27 21:00:00", "room": "2판", "map": "",
+     "players": ["왕건", "궁예"],
+     "results": {"왕건": {"code": 2, "at": "x", "dis": True}, "궁예": {"code": 1, "at": "x"}}},     # Dis = 패
+    {"id": "w3", "time": "2026-11-27 22:00:00", "started": "2026-11-27 21:50:00", "room": "혼자", "map": "",
+     "players": ["궁예"], "results": {"궁예": {"code": 1, "at": "x"}}},                            # 혼자: 제외
+]
+# 같은 기록으로 더미서버 ranking.json(게임 안 순위)이 내는 값 (이름, 점수, 승, 패, 무)
+WANGGUN_SERVER_RANKING = [("궁예", 1010, 1, 0, 0), ("왕건", 1000, 1, 1, 0), ("견훤", 990, 0, 1, 0)]
+
+
+class WanggunTests(unittest.TestCase):
+    """드롭박스 태조왕건: 더미서버 matches.json → 리더보드(= 게임 안 순위)·전적기록."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_import_and_leaderboard(self):
+        db = Database(Path(self.tmp) / "a.sqlite3")
+        st = Store(db, Path(self.tmp) / "replays", None, 15, {"wanggun": FakeSource(WANGGUN_RAW)})
+        s = st.import_server_records("wanggun")
+        self.assertEqual((s["created"], s["results"], s["mismatch"]), (2, 2, []))
+        lb = {r["name"]: (r["points"], r["w"], r["l"], r["d"]) for r in st.leaderboard("wanggun")}
+        self.assertEqual(lb, {n: (p, w, l, d) for n, p, w, l, d in WANGGUN_SERVER_RANKING})
+        self.assertEqual([r["name"] for r in st.leaderboard("wanggun")], ["궁예", "왕건", "견훤"])
+        total, rows = st.match_rows("wanggun")
+        self.assertEqual(total, 2)
+        self.assertEqual(rows[-1]["map_name"], "고려벌판")
+        self.assertEqual(rows[0]["map_name"], "맵 정보 없음")
+        self.assertEqual(st.leaderboard("samchun"), [])
+        db.conn.close()
+
+    def test_pages_render_and_upload_rejected(self):
+        from arena import web
+        from arena.games import get
+        db = Database(Path(self.tmp) / "a.sqlite3")
+        st = Store(db, Path(self.tmp) / "replays", None, 15, {"wanggun": FakeSource(WANGGUN_RAW)})
+        st.import_server_records("wanggun")
+        cfg = Config()
+        game = get("wanggun")
+        self.assertTrue(game.ready)
+        html = web.page_matches(cfg, st, game, {})
+        self.assertIn("리플레이 미지원", html)
+        self.assertIn("고려벌판", html)
+        self.assertIn("github.com/japanoxx-afk/wanggun/releases", web.page_download(cfg, game))
+        self.assertEqual(st.ingest("wanggun", b"junk", "x.bin").status, "rejected")
+        db.conn.close()

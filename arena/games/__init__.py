@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import ModuleType
 
-from . import rakmu, samchun
+from . import rakmu, samchun, wanggun
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class Game:
 GAMES = [
     Game("rakmu", rakmu.TITLE, True, rakmu),
     Game("samchun", samchun.TITLE, True, samchun),   # 호환 서버 matches.json 만 (리플레이 업로드 없음)
+    Game("wanggun", wanggun.TITLE, True, wanggun),   # 더미서버 matches.json 만 (리플레이 업로드 없음)
     Game("iop", "임팩트 오브 파워", False),      # 준비 중 (리플레이 형식 조사 후 추가)
 ]
 BY_KEY = {g.key: g for g in GAMES}
