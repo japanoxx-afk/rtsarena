@@ -1,0 +1,12 @@
+{
+  "arena_version": "1.0.0",
+  "arena_url": "https://github.com/japanoxx-afk/rtsarena/releases/download/arena-launcher-v1.0.0/RTS-Arena.exe",
+  "arena_size": 0,
+  "arena_sha256": "",
+  "games": {
+    "rhakmu": {
+      "version_url": "https://raw.githubusercontent.com/japanoxx-afk/new-rakum/main/version.json",
+      "setup_url": "https://akansas.synology.me:5001/sharing/TQcoAipwf"
+    }
+  }
+}

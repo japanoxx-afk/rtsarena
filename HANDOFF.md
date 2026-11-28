@@ -47,6 +47,8 @@ arena/
   games/rakmu.py   .rkr 해석: 맵 이름, 종족(위국군/아스트리아/바르바로이), 사람/컴퓨터, 경기 시간, 승패 추정
   static/app.css
 launcher/rakmu/arena_upload.py   라크무 런처용 (new-rakum 으로 복사해서 씀)
+launcher/rts-arena/              RTS-Arena 통합런처 (데스크톱 앱). 웹 서버 배포(arena/ 만 복사)와 무관.
+                                 배포 = 태그 arena-launcher-v* → .github/workflows/rts-arena-launcher.yml → GitHub Release
 deploy/compose.yaml              NAS Portainer 스택
 tests/test_arena.py              단위 + HTTP 종단 시험 (10개)
 tools/demo_seed.py               가짜 경기 30개

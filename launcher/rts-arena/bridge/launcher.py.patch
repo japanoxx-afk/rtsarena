@@ -1,0 +1,13 @@
+--- a/launcher.py	2026-11-29 03:04:28.989449227 +0900
++++ b/launcher.py	2026-11-29 03:04:29.006372964 +0900
+@@ -2832,6 +2832,10 @@
+ # ═══════════════════════════════════════════════════════
+ 
+ if __name__ == "__main__":
++    # RTS-Arena 통합런처가 숨김 모드로 호출 (arena_bridge.py 참고)
++    if any(a.startswith('--arena-') for a in sys.argv[1:]):
++        import arena_bridge
++        sys.exit(arena_bridge.main(sys.argv[1:], globals()))
+     if '--update-probe' in sys.argv:
+         if viewport_patch.manifest().get('version')!=10:
+             raise RuntimeError('고해상도 패치 데이터 누락')

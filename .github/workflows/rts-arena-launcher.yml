@@ -1,0 +1,81 @@
+# RTS-Arena 통합런처 (launcher/rts-arena) 전용 빌드·배포.
+# 웹 서버(arena/)와 무관하다: 웹 서버는 deploy/Prepare-NasUpload.ps1 로 NAS 에 손으로 올린다.
+#
+# 배포:  git tag arena-launcher-v1.0.1 && git push origin arena-launcher-v1.0.1
+#   → Windows 에서 테스트·빌드 → GitHub Release 에 RTS-Arena.exe 첨부
+#   (태그 버전은 launcher/rts-arena/arena_core/__init__.py 의 ARENA_VERSION 과 같아야 한다)
+name: RTS-Arena launcher
+
+on:
+  push:
+    tags: ["arena-launcher-v*"]
+  pull_request:
+    paths: ["launcher/rts-arena/**", ".github/workflows/rts-arena-launcher.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: launcher/rts-arena
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Check tag matches ARENA_VERSION
+        if: startsWith(github.ref, 'refs/tags/arena-launcher-v')
+        shell: python
+        run: |
+          import os, re, sys
+          src = open("arena_core/__init__.py", encoding="utf-8").read()
+          version = re.search(r'ARENA_VERSION = "([^"]+)"', src).group(1)
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("arena-launcher-v")
+          print("ARENA_VERSION", version, "tag", tag)
+          sys.exit(0 if version == tag else "tag and ARENA_VERSION differ")
+
+      - name: Build exe
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m PyInstaller --noconfirm --clean RTSArena.spec
+
+      - name: Hash
+        id: hash
+        shell: pwsh
+        run: |
+          $f = Get-Item dist/RTS-Arena.exe
+          $sha = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+          "size=$($f.Length)" >> $env:GITHUB_OUTPUT
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          Write-Host "size $($f.Length)  sha256 $sha"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RTS-Arena
+          path: launcher/rts-arena/dist/RTS-Arena.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/arena-launcher-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          RTS-Arena 통합런처 $env:GITHUB_REF_NAME
+
+          - 크기: ${{ steps.hash.outputs.size }} bytes
+          - SHA256: ${{ steps.hash.outputs.sha }}
+
+          arena.json 의 arena_size / arena_sha256 에 위 값을 넣으면 자체 업데이트 때 무결성 검사를 합니다.
+          "@
+          gh release create $env:GITHUB_REF_NAME dist/RTS-Arena.exe --title "RTS-Arena Launcher $env:GITHUB_REF_NAME" --notes $notes

@@ -1,0 +1,4 @@
+# cmd.exe 는 LF 줄바꿈 .bat 를 잘못 읽을 수 있다
+*.bat text eol=crlf
+*.png binary
+*.ico binary
