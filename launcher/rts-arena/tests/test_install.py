@@ -49,7 +49,7 @@ class InstallTest(unittest.TestCase):
         target, top, _ = plan(zip_path, downloads, "RhakMu")
         self.assertEqual((target, top), (downloads, "라크무"))
         extract(zip_path, target)
-        self.assertEqual(find_dir_with(target / top, REQ), (downloads / "라크무").resolve())
+        self.assertEqual(find_dir_with(target / top, REQ).resolve(), (downloads / "라크무").resolve())
         self.assertTrue((downloads / "라크무" / "DATA" / "맵" / "테스트.rkm").is_file())
 
     def test_flat_zip_gets_own_folder(self):
